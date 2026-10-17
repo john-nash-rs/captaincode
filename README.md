@@ -381,18 +381,16 @@ model provider.
 
 Releases are driven entirely by GitHub Actions. Nothing is published by hand.
 
-**1. Prepare the tap** (once). See
-[homebrew-tap/README.md](homebrew-tap/README.md) for the exact commands.
-
-**2. Configure the token** (once). The cask is pushed to a *separate*
-repository, so it needs a token the workflow's own `GITHUB_TOKEN` cannot
-provide:
+**1. Configure the token** (once). The cask is pushed to the separate
+`john-nash-rs/homebrew-tap` repository, so it needs a token the workflow's own
+`GITHUB_TOKEN` cannot provide. The tap itself already exists and is
+initialised — see [homebrew-tap/README.md](homebrew-tap/README.md).
 
 ```sh
 gh secret set GITHUB_PERSONAL_AUTH_TOKEN --repo john-nash-ns/captaincode
 ```
 
-**3. Tag and push.**
+**2. Tag and push.**
 
 ```sh
 git tag -a v0.1.0 -m "v0.1.0"

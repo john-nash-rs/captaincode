@@ -3,7 +3,7 @@ package ui
 import (
 	tea "charm.land/bubbletea/v2"
 	"context"
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 	"testing"
 )
 

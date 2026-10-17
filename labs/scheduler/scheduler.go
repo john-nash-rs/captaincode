@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 )
 
 // Batch accepts only independent operations already admitted by the caller.

@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"example.com/agentbook/core"
 	openrouter "github.com/OpenRouterTeam/go-sdk"
 	"github.com/OpenRouterTeam/go-sdk/models/components"
 	"github.com/OpenRouterTeam/go-sdk/retry"
+	"github.com/john-nash-rs/captaincode/core"
 )
 
 type OpenRouter struct {

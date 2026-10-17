@@ -9,7 +9,7 @@ case "$chapter" in
   05|5) go test ./labs/retry ./core ;;
   06|6) go test ./core -run Context ;;
   07|7) go test ./toolbox ./evals ;;
-  08|8) AGENTBOOK_SANDBOX_TEST=1 go test -count=1 ./sandbox ;;
+  08|8) CAPTAINCODE_SANDBOX_TEST=1 go test -count=1 ./sandbox ;;
   09|9) go test ./provider ;;
   10) go test ./labs/orders ;;
   11) go test ./storage ;;
@@ -19,6 +19,6 @@ case "$chapter" in
   15) go test ./evals ;;
   16) go test ./ui ;;
   17) go test ./toolbox ./core ;;
-  18) go test ./...; go build -o bin/agentbook ./cmd/agentbook ;;
+  18) go test ./...; go build -o bin/captaincode ./cmd/captaincode ;;
   *) printf 'Choose a chapter number from 01 to 18.\n' >&2; exit 2 ;;
 esac

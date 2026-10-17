@@ -18,7 +18,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 )
 
 // Runner executes one question and reports progress through the callback.
@@ -470,7 +470,7 @@ func (m *model) addLine(line string) {
 
 // banner is the greeting shown before the first prompt.
 func banner(paint theme) string {
-	return paint.brand.Render("Agentbook") + paint.muted.Render("  ·  coding agent harness")
+	return paint.brand.Render("CaptainCode") + paint.muted.Render("  ·  coding agent harness")
 }
 
 // boxChrome is the width the border and padding consume around the editor text.

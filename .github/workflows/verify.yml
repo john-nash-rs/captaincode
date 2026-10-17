@@ -22,7 +22,7 @@ jobs:
       - run: go vet ./...
       - run: go test -race -count=1 ./...
         env:
-          AGENTBOOK_SANDBOX_TEST: '1'
-      - run: go build -o bin/agentbook ./cmd/agentbook
+          CAPTAINCODE_SANDBOX_TEST: '1'
+      - run: go build -o bin/captaincode ./cmd/captaincode
       - name: Offline CLI smoke
-        run: ./bin/agentbook --workspace ./testdata/project --db "$RUNNER_TEMP/agentbook-smoke.db"
+        run: ./bin/captaincode --workspace ./testdata/project --db "$RUNNER_TEMP/captaincode-smoke.db"

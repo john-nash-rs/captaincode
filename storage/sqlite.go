@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 	_ "modernc.org/sqlite"
 )
 

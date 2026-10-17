@@ -15,18 +15,18 @@ import (
 	"syscall"
 	"time"
 
-	"example.com/agentbook/config"
-	"example.com/agentbook/core"
-	"example.com/agentbook/provider"
-	"example.com/agentbook/sandbox"
-	"example.com/agentbook/storage"
-	"example.com/agentbook/toolbox"
-	"example.com/agentbook/ui"
+	"github.com/john-nash-rs/captaincode/config"
+	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/provider"
+	"github.com/john-nash-rs/captaincode/sandbox"
+	"github.com/john-nash-rs/captaincode/storage"
+	"github.com/john-nash-rs/captaincode/toolbox"
+	"github.com/john-nash-rs/captaincode/ui"
 )
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "agentbook:", err)
+		fmt.Fprintln(os.Stderr, "captaincode:", err)
 		os.Exit(1)
 	}
 }
@@ -75,7 +75,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		*databasePath = filepath.Join(directory, "agentbook", "sessions.db")
+		*databasePath = filepath.Join(directory, "captaincode", "sessions.db")
 	}
 	dbPath, err := filepath.Abs(*databasePath)
 	if err != nil {

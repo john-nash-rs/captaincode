@@ -2,9 +2,9 @@ package evals
 
 import (
 	"context"
-	"example.com/agentbook/core"
-	"example.com/agentbook/storage"
-	"example.com/agentbook/toolbox"
+	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/storage"
+	"github.com/john-nash-rs/captaincode/toolbox"
 	"os"
 	"path/filepath"
 	"strings"

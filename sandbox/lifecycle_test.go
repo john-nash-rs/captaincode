@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"example.com/agentbook/toolbox"
+	"github.com/john-nash-rs/captaincode/toolbox"
 )
 
 func TestOSNetworkAndEnvironmentBoundary(t *testing.T) {
-	if os.Getenv("AGENTBOOK_SANDBOX_TEST") != "1" {
+	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
 		t.Skip("OS probes require explicit opt-in")
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("network-canary")) }))
@@ -44,7 +44,7 @@ func TestOSNetworkAndEnvironmentBoundary(t *testing.T) {
 }
 
 func TestOSCancellationStopsHeartbeat(t *testing.T) {
-	if os.Getenv("AGENTBOOK_SANDBOX_TEST") != "1" {
+	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
 		t.Skip("OS probes require explicit opt-in")
 	}
 	root := t.TempDir()

@@ -21,4 +21,4 @@ These entries share the final tested source. Chapter 02 also contains a standalo
 | 15: Evaluation | [evals/eval_test.go](../evals/eval_test.go) | `./checkpoint 15` | Use fresh workspaces and inspect behavior as well as answers. |
 | 16: Terminal UI | [ui/ui.go](../ui/ui.go) | `./checkpoint 16` | Queue input, ignore stale events, and propagate cancellation. |
 | 17: Edits and commands | [toolbox/registry.go](../toolbox/registry.go) | `./checkpoint 17` | Detect stale edits and preserve command uncertainty. |
-| 18: Assembled harness | [cmd/agentbook/main.go](../cmd/agentbook/main.go) | `./checkpoint 18` | Build the CLI after the complete deterministic suite passes. |
+| 18: Assembled harness | [cmd/captaincode/main.go](../cmd/captaincode/main.go) | `./checkpoint 18` | Build the CLI after the complete deterministic suite passes. |

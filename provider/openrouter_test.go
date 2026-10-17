@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"

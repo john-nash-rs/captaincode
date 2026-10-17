@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 	"os"
 	"path/filepath"
 	"testing"

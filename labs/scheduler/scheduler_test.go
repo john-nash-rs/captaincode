@@ -2,8 +2,8 @@ package scheduler
 
 import (
 	"context"
-	"example.com/agentbook/core"
 	"fmt"
+	"github.com/john-nash-rs/captaincode/core"
 	"sync/atomic"
 	"testing"
 	"time"

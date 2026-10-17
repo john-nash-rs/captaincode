@@ -2,7 +2,7 @@
 
 Prerequisite: chapters 1–17 and the companion setup guide.
 
-Read [cmd/agentbook/main.go](../../cmd/agentbook/main.go). Run `./checkpoint 18` from the companion root.
+Read [cmd/captaincode/main.go](../../cmd/captaincode/main.go). Run `./checkpoint 18` from the companion root.
 
 Observe: Build the CLI after the complete deterministic suite passes.
 

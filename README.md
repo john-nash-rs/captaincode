@@ -1,4 +1,4 @@
-# Agentbook companion
+# CaptainCode companion
 
 A small, single-user coding-agent harness for **Build an AI Coding Agent** by Harsh Vardhan. Concepts are language-independent; this implementation uses Go. Review draft, 17 October 2026.
 
@@ -10,8 +10,8 @@ Use **Go 1.26.9** (the minimum in go.mod) on macOS or Linux. Earlier authoring t
 go version
 go mod download
 go test ./...
-go build -o bin/agentbook ./cmd/agentbook
-./bin/agentbook --workspace ./testdata/project --db /tmp/agentbook-demo.db
+go build -o bin/captaincode ./cmd/captaincode
+./bin/captaincode --workspace ./testdata/project --db /tmp/captaincode-demo.db
 ```
 
 Expected final answer: `The project version is 2.5.0 (package.json).` A run ID and event metadata also appear. Use a fresh database path when exposing a different workspace. The store binds a database to one canonical project path and refuses another project.
@@ -27,7 +27,7 @@ The CLI always runs tools through the sandbox worker. Ordinary package tests als
 Run real boundary probes explicitly:
 
 ```sh
-AGENTBOOK_SANDBOX_TEST=1 go test -count=1 ./sandbox
+CAPTAINCODE_SANDBOX_TEST=1 go test -count=1 ./sandbox
 ```
 
 The network probe also requires `/usr/bin/curl`. Tests check allowed operations as well as forbidden ones. A failed isolation setup prevents tool execution; there is no unsandboxed fallback.
@@ -46,8 +46,8 @@ See [the checkpoint map](checkpoints/README.md). Chapter 2 is a standalone minim
 Copy `examples/read-only.json` to a private user configuration file. Add a `model` property containing a current OpenRouter model identifier with tool support. Set `OPENROUTER_API_KEY` in your shell through your normal secret-management process; do not put it in the project, config, command history, or a shared transcript.
 
 ```sh
-./bin/agentbook --workspace ./testdata/project \
-  --db /tmp/agentbook-live.db --config /path/to/private-config.json \
+./bin/captaincode --workspace ./testdata/project \
+  --db /tmp/captaincode-live.db --config /path/to/private-config.json \
   --provider openrouter --question 'What is the project version?'
 ```
 
@@ -57,11 +57,11 @@ This sends selected project content to OpenRouter and its routed provider and ca
 
 No project config is auto-loaded. Only the explicit `--config` file overrides defaults. Unknown fields, invalid ranges, and trailing JSON are rejected. Secrets are not config fields. `allow_writes` and `allow_commands` default to false. Enabling them is a coarse grant for the exposed project, not a per-call approval. Use a disposable copy when experimenting.
 
-The database must be outside the tool workspace. Default storage uses the OS user-config directory under `agentbook/sessions.db`; pass `--db` for each separate project. A process lock prevents two application instances from owning the same database. Locking does not coordinate external editors or aliases to the same database inode through hard links.
+The database must be outside the tool workspace. Default storage uses the OS user-config directory under `captaincode/sessions.db`; pass `--db` for each separate project. A process lock prevents two application instances from owning the same database. Locking does not coordinate external editors or aliases to the same database inode through hard links.
 
 ```sh
-./bin/agentbook --workspace ./testdata/project --db /tmp/agentbook-demo.db --resume RUN_ID
-./bin/agentbook --workspace ./testdata/project --db /tmp/agentbook-ui.db --tui
+./bin/captaincode --workspace ./testdata/project --db /tmp/captaincode-demo.db --resume RUN_ID
+./bin/captaincode --workspace ./testdata/project --db /tmp/captaincode-ui.db --tui
 ```
 
 Replace `RUN_ID` with an actual saved identifier. Completed runs return their saved answer. Cancelled, failed, and blocked runs are terminal. Interrupted reads may be repeated; unknown mutations block for reconciliation. Current permissions apply on recovery. The UI queues independent new runs, not follow-up messages to an active conversation. Enter submits, Escape cancels, Ctrl+C requests cancellation and exits after completion.
@@ -72,7 +72,7 @@ Replace `RUN_ID` with an actual saved identifier. Completed runs return their sa
 go mod verify
 go vet ./...
 go test -race -count=1 ./...
-AGENTBOOK_SANDBOX_TEST=1 go test -count=1 ./sandbox
+CAPTAINCODE_SANDBOX_TEST=1 go test -count=1 ./sandbox
 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 ```
 

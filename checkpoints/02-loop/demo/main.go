@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	loop "example.com/agentbook/checkpoints/02-loop"
 	"fmt"
+	loop "github.com/john-nash-rs/captaincode/checkpoints/02-loop"
 	"log"
 )
 

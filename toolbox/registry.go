@@ -17,7 +17,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 )
 
 type Registry struct {
@@ -200,7 +200,7 @@ func (r Registry) Execute(ctx context.Context, call core.Call) core.Result {
 		}
 		// The application is a single writer. Other editors can still race this
 		// check; the book documents that this is not an OS compare-and-swap.
-		temporary := args.Path + ".agentbook-tmp"
+		temporary := args.Path + ".captaincode-tmp"
 		file, err := root.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err != nil {
 			return fileError(err)

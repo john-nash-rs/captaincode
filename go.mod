@@ -1,4 +1,4 @@
-module example.com/agentbook
+module github.com/john-nash-rs/captaincode
 
 go 1.26.9
 

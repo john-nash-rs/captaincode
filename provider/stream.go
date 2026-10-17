@@ -3,7 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"errors"
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 )
 
 type Chunk struct {

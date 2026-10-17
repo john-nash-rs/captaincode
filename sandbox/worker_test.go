@@ -2,8 +2,8 @@ package sandbox
 
 import (
 	"context"
-	"example.com/agentbook/core"
-	"example.com/agentbook/toolbox"
+	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/toolbox"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,8 +20,8 @@ func TestUnavailableSandboxFailsClosed(t *testing.T) {
 	}
 }
 func TestOSReadWriteBoundaries(t *testing.T) {
-	if os.Getenv("AGENTBOOK_SANDBOX_TEST") != "1" {
-		t.Skip("set AGENTBOOK_SANDBOX_TEST=1 for actual OS enforcement probes")
+	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
+		t.Skip("set CAPTAINCODE_SANDBOX_TEST=1 for actual OS enforcement probes")
 	}
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")

@@ -18,8 +18,8 @@ import (
 	"syscall"
 	"time"
 
-	"example.com/agentbook/core"
-	"example.com/agentbook/toolbox"
+	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/toolbox"
 )
 
 type Worker struct {
@@ -149,7 +149,7 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 				args = append(args, "--ro-bind", "/dev/null", target)
 			}
 		}
-		args = append(args, "--ro-bind", executable, "/agentbook", "--chdir", "/workspace", "--", "/agentbook")
+		args = append(args, "--ro-bind", executable, "/captaincode", "--chdir", "/workspace", "--", "/captaincode")
 		args = append(args, workerArgs...)
 		command = exec.CommandContext(ctx, binary, args...)
 	default:

@@ -2,7 +2,7 @@ package storage
 
 import (
 	"context"
-	"example.com/agentbook/core"
+	"github.com/john-nash-rs/captaincode/core"
 	"path/filepath"
 	"testing"
 )

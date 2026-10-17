@@ -2,8 +2,8 @@ package provider
 
 import (
 	"context"
-	"example.com/agentbook/core"
 	"fmt"
+	"github.com/john-nash-rs/captaincode/core"
 	"net/http"
 	"net/http/httptest"
 	"testing"

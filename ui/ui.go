@@ -282,6 +282,13 @@ func (m *model) key(item tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.start()
 		}
 
+	case "tab":
+		// Finish a uniquely matching command. An ambiguous prefix is left as
+		// typed so the suggestion list stays the operator's guide.
+		if !m.secret {
+			m.input = []rune(completion(string(m.input)))
+		}
+
 	case "backspace":
 		if len(m.input) > 0 {
 			m.input = m.input[:len(m.input)-1]
@@ -431,14 +438,9 @@ func (m *model) View() tea.View {
 		height = 6
 	}
 
-	// Build the bottom block first; its height is fixed.
-	var bottom strings.Builder
-	if m.running {
-		bottom.WriteString(m.statusLine())
-		bottom.WriteByte('\n')
-	}
-	bottom.WriteString(m.prompt(width))
-	bottomRows := strings.Count(bottom.String(), "\n") + 1
+	// Build the bottom block first; its row count drives both the transcript
+	// budget and the cursor position.
+	bottom, bottomRows := m.bottomBlock(width, height)
 
 	// The splash occupies transcript rows while it is shown, so it has to come
 	// out of the budget before the conversation is laid out.
@@ -464,33 +466,146 @@ func (m *model) View() tea.View {
 	for ; rows < height-bottomRows; rows++ {
 		b.WriteByte('\n')
 	}
-	b.WriteString(bottom.String())
+	b.WriteString(bottom)
 
 	view := tea.NewView(b.String())
 	// Position the real terminal cursor inside the editor so native editing and
-	// copy/paste keep working. X is the text column inside the border; Y is the
-	// prompt's row inside the box, which sits above the footer and hint.
+	// copy/paste keep working. X tracks the typed text so the bar advances as
+	// the operator writes, and is clamped so it never crosses the border. Y is
+	// the prompt's row, which shifts down when a status line or a suggestion
+	// list is present.
 	view.Cursor = &tea.Cursor{
 		Position: tea.Position{
-			X: promptWidth,
-			Y: height - bottomRows + boxContentRow + offsetOfPrompt(m.running),
+			X: m.cursorColumn(width),
+			Y: height - bottomRows + boxContentRow + offsetOfPrompt(m.running, bottomRows),
 		},
 		Shape: tea.CursorBar,
 	}
 	return view
 }
 
+// cursorColumn is the editor's text column plus the visible input width. The
+// value is clamped to the last column inside the border.
+// maskWidth is the fixed number of bullets shown while a credential is typed.
+const maskWidth = 12
+
+func (m *model) cursorColumn(width int) int {
+	if m.secret {
+		// Credential entry renders a fixed mask, so the caret sits after it.
+		return promptWidth + maskWidth
+	}
+	col := promptWidth + lipgloss.Width(safe(string(m.input)))
+	if limit := width - 2; col > limit { // 2 for the right border and its padding
+		col = limit
+	}
+	if col < promptWidth {
+		col = promptWidth
+	}
+	return col
+}
+
 // boxContentRow is the row inside the bordered box that holds the prompt text:
 // one row for the top border, then the first content row.
 const boxContentRow = 1
 
-// offsetOfPrompt returns the row of the prompt line within the bottom block.
-// The status line, when present, occupies row zero.
-func offsetOfPrompt(running bool) int {
+// offsetOfPrompt returns the row of the prompt within the bottom block,
+// relative to the block's first row. The prompt sits inside the bordered
+// editor, so the only thing above it is the editor's own top border, counted
+// separately by boxContentRow, and an optional status line.
+func offsetOfPrompt(running bool, _ int) int {
 	if running {
-		return 1
+		return 1 // the status line occupies the first row of the block
 	}
 	return 0
+}
+
+// commandList is the authoritative set of interface commands. Suggestions and
+// completion both read from it so they cannot drift apart.
+var commandList = []string{
+	"/openrouter",
+	"/openrouter api-key",
+	"/openrouter model",
+	"/openrouter clear-key",
+	"/openrouter path",
+	"/help",
+}
+
+// suggestions returns the rows shown beneath the editor while the input looks
+// like a command. Nothing is shown for ordinary text, so a normal prompt is
+// never crowded by a menu it does not need.
+func (m *model) suggestions() []string {
+	if m.secret || !strings.HasPrefix(string(m.input), "/") {
+		return nil
+	}
+	typed := string(m.input)
+	var rows []string
+	for _, c := range commandList {
+		if strings.HasPrefix(c, typed) {
+			rows = append(rows, m.theme.muted.Render("  "+c))
+		}
+		if len(rows) == maxSuggestions {
+			break
+		}
+	}
+	return rows
+}
+
+const maxSuggestions = 6
+
+// completion returns the input extended to the best matching command. It
+// returns the first match when several fit, which is the same one the
+// suggestion list shows first, so what Tab produces is never a surprise. It
+// returns the input unchanged when nothing matches.
+func completion(input string) string {
+	if input == "" || !strings.HasPrefix(input, "/") {
+		return input
+	}
+	for _, c := range commandList {
+		if strings.HasPrefix(c, input) {
+			return c
+		}
+	}
+	return input
+}
+
+// bottomBlock assembles the fixed rows beneath the transcript: an optional
+// status line, the bordered editor, an optional suggestion list, the footer,
+// and a hint line. It returns the text and its exact row count so the
+// transcript budget and the cursor stay consistent with what is drawn.
+func (m *model) bottomBlock(width, height int) (string, int) {
+	var b strings.Builder
+	if m.running {
+		b.WriteString(m.statusLine())
+		b.WriteByte('\n')
+	}
+	b.WriteString(m.inputBox(width))
+	b.WriteByte('\n')
+	// Suggestions are dropped when the terminal is too short to keep the
+	// prompt and the transcript on screen.
+	if rows := m.suggestions(); height-len(rows) >= 8 {
+		for _, row := range rows {
+			b.WriteString(row)
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString(m.footer(width))
+	b.WriteByte('\n')
+
+	hint := "enter send · esc cancel run · ctrl+c quit"
+	switch {
+	case m.secret:
+		hint = "enter save · esc cancel · input is not shown"
+	case strings.HasPrefix(string(m.input), "/"):
+		hint = "tab completes · enter runs · esc clears"
+	case !m.running:
+		hint = "enter send · ctrl+c quit · /help for commands"
+	}
+	if m.notice != "" {
+		hint = m.notice
+	}
+	b.WriteString(m.theme.muted.Render(truncate(hint, width-2)))
+	text := b.String()
+	return text, strings.Count(text, "\n") + 1
 }
 
 // tail returns the last lines that fit in budget rendered rows after wrapping,
@@ -598,26 +713,6 @@ func elide(text string, width int) string {
 	head := (keep + 1) / 2
 	tail := keep / 2
 	return string(runes[:head]) + "…" + string(runes[len(runes)-tail:])
-}
-
-func (m *model) prompt(width int) string {
-	var b strings.Builder
-	b.WriteString(m.inputBox(width))
-	b.WriteByte('\n')
-	b.WriteString(m.footer(width))
-	b.WriteByte('\n')
-	hint := "enter send · esc cancel run · ctrl+c quit"
-	switch {
-	case m.secret:
-		hint = "enter save · esc cancel · input is not shown"
-	case !m.running:
-		hint = "enter send · ctrl+c quit · /help for commands"
-	}
-	if m.notice != "" {
-		hint = m.notice
-	}
-	b.WriteString(m.theme.muted.Render(truncate(hint, width-2)))
-	return b.String()
 }
 
 func (m *model) addLine(line string) {

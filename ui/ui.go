@@ -488,14 +488,19 @@ func banner(paint theme, width int) string {
 // asciiArt is the full-screen splash. It is decorative, so it is only drawn
 // when the terminal is wide enough to show it without wrapping, and it is
 // replaced by the one-line banner once the first run starts.
+//
+// The artwork is a condensed 6-pixel font in Unicode quadrant glyphs, 32
+// columns by 4 rows. GoldenArtHash pins its contents: a corrupted or
+// accidentally edited wordmark must fail a test rather than ship.
 var asciiArt = []string{
-	` ██████╗ █████╗ ██████╗ ████████╗ ██╗██╗   ██╗`,
-	`██╔════╝██╔══██╗██╔═══██╗╚══██╔══╝██║██║   ██║`,
-	`██║     ███████║██║   ██║   ██║   ██║██║   ██║`,
-	`██║     ██╔══██║██║   ██║   ██║   ██║██║   ██║`,
-	`╚██████╗██║  ██║╚██████╔╝   ██║   ╚██████╔╝`,
-	` ╚═════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝    ╚═════╝ `,
+	`▞▀▖      ▐     ▗    ▞▀▖     ▌   `,
+	`▌  ▝▀▖▛▀▖▜▀ ▝▀▖▄ ▛▀▖▌  ▞▀▖▞▀▌▞▀▖`,
+	`▌ ▖▞▀▌▙▄▘▐ ▖▞▀▌▐ ▌ ▌▌ ▖▌ ▌▌ ▌▛▀ `,
+	`▝▀ ▝▀▘▌   ▀ ▝▀▘▀▘▘ ▘▝▀ ▝▀ ▝▀▘▝▀▘`,
 }
+
+// GoldenArtHash is the expected sha256 of asciiArt joined by newlines.
+const GoldenArtHash = "4a423c8c5ab4edab"
 
 const tagline = "with <3 by SkillCaptain"
 

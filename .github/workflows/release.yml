@@ -13,7 +13,9 @@ on:
   push:
     tags:
       - 'v*'
-  # Allows a dry run from the Actions tab without publishing anything.
+  # Re-runs a release for an existing tag. This PUBLISHES, despite being a
+  # manual dispatch: it is a recovery path for a failed or incomplete release,
+  # not a dry run.
   workflow_dispatch:
     inputs:
       tag:
@@ -34,7 +36,18 @@ env:
 jobs:
   verify:
     name: verify
-    runs-on: ubuntu-24.04
+    # ubuntu-22.04 deliberately, not ubuntu-24.04.
+    #
+    # The sandbox probes build a network namespace and add a loopback address
+    # in it. GitHub's ubuntu-24.04 image runs jobs in a container that forbids
+    # RTM_NEWADDR, so bubblewrap fails there with
+    # "Failed RTM_NEWADDR: Operation not permitted" and the suite fails for a
+    # reason that says nothing about this code.
+    #
+    # ubuntu-22.04 is the runner the existing verify workflow already uses and
+    # is known to pass. When that image is retired the probes will need a
+    # runner that permits these namespaces, not a different image version.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6

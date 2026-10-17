@@ -17,6 +17,7 @@ import (
 
 	"github.com/john-nash-rs/captaincode/config"
 	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/keyring"
 	"github.com/john-nash-rs/captaincode/provider"
 	"github.com/john-nash-rs/captaincode/sandbox"
 	"github.com/john-nash-rs/captaincode/storage"
@@ -107,20 +108,30 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Built before the provider so the model can be read per request, which is
+	// what lets /openrouter model apply without a restart.
+	settings, err := newSettings(*configPath, *providerName, cfg.Model)
+	if err != nil {
+		return err
+	}
 	var languageModel core.Model = core.Fixture{}
 	switch *providerName {
 	case "fixture":
 		fmt.Fprintln(os.Stderr, "Deterministic fixture: supports the package.json version task only.")
 	case "openrouter":
-		key := os.Getenv("OPENROUTER_API_KEY")
-		if key == "" {
-			return errors.New("set OPENROUTER_API_KEY")
+		// A missing credential is not fatal here. The interface can store one
+		// with /openrouter api-key, so refusing to start would leave no way to
+		// supply it. The provider reports the failure when a request needs it.
+		if _, err := keyring.Resolve(); err != nil {
+			return err
 		}
-		if cfg.Model == "" {
-			return errors.New("set model in your config")
-		}
-		adapter := provider.New(key, cfg.Model, "")
+		// Both the credential and the model are resolved per request, so
+		// /openrouter api-key and /openrouter model take effect immediately.
+		adapter := provider.NewWithKey(
+			func(context.Context) (string, error) { return keyring.Resolve() },
+			settings.Model(), "")
 		adapter.Stream = *stream
+		adapter.ModelFunc = settings.Model
 		languageModel = adapter
 	default:
 		return errors.New("unknown provider")
@@ -156,10 +167,11 @@ func run() error {
 		// never has to infer them. Passing them keeps that dependency explicit.
 		return ui.Run(runOne, ui.Info{
 			Provider:      *providerName,
-			Model:         cfg.Model,
+			Model:         settings.Model(),
 			Workspace:     *workspace,
 			AllowWrites:   cfg.AllowWrites,
 			AllowCommands: cfg.AllowCommands,
+			Settings:      settings,
 		})
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

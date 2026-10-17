@@ -19,6 +19,18 @@ type OpenRouter struct {
 	Model  string
 	Stream bool
 	OnText func(string)
+	// ModelFunc, when set, supplies the model identifier per request so that
+	// changing it from the terminal interface takes effect immediately. The
+	// stored Model is used when it is nil.
+	ModelFunc func() string
+}
+
+// model returns the identifier to use for one request.
+func (p *OpenRouter) model() string {
+	if p.ModelFunc != nil {
+		return p.ModelFunc()
+	}
+	return p.Model
 }
 
 type cappedTransport struct{ base http.RoundTripper }
@@ -35,8 +47,28 @@ func (t cappedTransport) RoundTrip(request *http.Request) (*http.Response, error
 	return response, err
 }
 
+// KeySource returns the credential for one request. It is consulted per call
+// rather than captured at construction so a credential stored from the
+// terminal interface takes effect on the next request without a restart.
+type KeySource func(context.Context) (string, error)
+
 func New(key, model, server string) *OpenRouter {
-	options := []openrouter.SDKOption{openrouter.WithSecurity(key), openrouter.WithRetryConfig(retry.Config{Strategy: "none"}), openrouter.WithClient(&http.Client{Timeout: 60 * time.Second, Transport: cappedTransport{base: http.DefaultTransport}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }})}
+	return NewWithKey(func(context.Context) (string, error) { return key, nil }, model, server)
+}
+
+// NewWithKey builds an adapter that resolves its credential on every request.
+func NewWithKey(source KeySource, model, server string) *OpenRouter {
+	security := func(ctx context.Context) (components.Security, error) {
+		key, err := source(ctx)
+		if err != nil {
+			return components.Security{}, err
+		}
+		if key == "" {
+			return components.Security{}, errors.New("no provider credential is configured")
+		}
+		return components.Security{APIKey: &key}, nil
+	}
+	options := []openrouter.SDKOption{openrouter.WithSecuritySource(security), openrouter.WithRetryConfig(retry.Config{Strategy: "none"}), openrouter.WithClient(&http.Client{Timeout: 60 * time.Second, Transport: cappedTransport{base: http.DefaultTransport}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }})}
 	if server != "" {
 		options = append(options, openrouter.WithServerURL(server))
 	}
@@ -61,7 +93,7 @@ type wireMessage struct {
 }
 
 func (p *OpenRouter) Complete(ctx context.Context, history []core.Message, definitions []core.Definition) (core.Message, error) {
-	if p.Model == "" {
+	if p.model() == "" {
 		return core.Message{}, errors.New("configure an explicit OpenRouter model ID")
 	}
 	messages := make([]wireMessage, 0, len(history))
@@ -79,7 +111,7 @@ func (p *OpenRouter) Complete(ctx context.Context, history []core.Message, defin
 	for _, definition := range definitions {
 		tools = append(tools, map[string]any{"type": "function", "function": definition})
 	}
-	data, err := json.Marshal(map[string]any{"model": p.Model, "messages": messages, "tools": tools, "stream": p.Stream, "max_tokens": 2048})
+	data, err := json.Marshal(map[string]any{"model": p.model(), "messages": messages, "tools": tools, "stream": p.Stream, "max_tokens": 2048})
 	if err != nil {
 		return core.Message{}, err
 	}

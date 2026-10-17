@@ -24,6 +24,24 @@ import (
 // Runner executes one question and reports progress through the callback.
 type Runner func(context.Context, string, func(core.Event)) (string, error)
 
+// Settings is what the interface needs in order to show and change
+// connection state. It is an interface so this package never reads or writes
+// the filesystem or a credential itself, and so tests can supply a fake.
+type Settings interface {
+	// Status reports the current provider, model, and a credential rendered
+	// safe to display. The implementation must never return a raw key.
+	Status() (provider, model, credential string)
+	// StoreCredential persists a credential supplied by the operator.
+	StoreCredential(string) error
+	// ClearCredential removes the stored credential.
+	ClearCredential() error
+	// StoreModel persists a model identifier.
+	StoreModel(string) error
+	// CredentialPath is the file a stored credential lives in, reported so the
+	// operator can find and delete it.
+	CredentialPath() string
+}
+
 // Info is the harness state the interface reports but does not own.
 //
 // The caller already resolved the provider, model, workspace, and permission
@@ -36,6 +54,7 @@ type Info struct {
 	Workspace     string
 	AllowWrites   bool
 	AllowCommands bool
+	Settings      Settings
 }
 
 const (
@@ -78,6 +97,11 @@ type model struct {
 	started       time.Time
 	frame         int
 	forceQuit     bool // set once the terminal closes so Exit cannot hang
+
+	// secret is true while the operator is typing a credential. Input is
+	// masked and never enters the transcript.
+	secret bool
+	notice string // transient confirmation shown under the prompt
 }
 
 // theme holds the styles used to render. A zero theme paints plain text, which
@@ -231,15 +255,30 @@ func (m *model) key(item tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "esc":
+		// Leaving credential entry must not also cancel a running request.
+		if m.secret {
+			m.secret, m.input = false, nil
+			m.notice = "cancelled"
+			return m, nil
+		}
 		if m.cancel != nil {
 			m.cancel()
 		}
 
 	case "enter":
+		if m.secret {
+			return m.commitSecret()
+		}
 		// While a run is active the prompt is buffered, not dispatched.
 		if len(m.input) > 0 && len(m.queue) < queueLimit && !m.quitting {
-			m.queue = append(m.queue, string(m.input))
+			text := string(m.input)
 			m.input = nil
+			// A leading slash is an interface command, never a model prompt.
+			if strings.HasPrefix(text, "/") {
+				m.runCommand(text)
+				return m, nil
+			}
+			m.queue = append(m.queue, text)
 			return m, m.start()
 		}
 
@@ -258,6 +297,110 @@ func (m *model) key(item tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// runCommand executes an interface command. Commands are handled entirely
+// inside the interface: they never become prompts, so they are never sent to a
+// model and never reach the engine.
+func (m *model) runCommand(text string) {
+	fields := strings.Fields(text)
+	verb := strings.ToLower(fields[0])
+	arg := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
+	settings := m.info.Settings
+
+	if verb != "/openrouter" && verb != "/config" {
+		if verb == "/help" || verb == "/?" {
+			m.addLine(m.theme.muted.Render(commandHelp))
+			return
+		}
+		m.addLine(m.theme.failure.Render("Unknown command " + verb + ". Try /help."))
+		return
+	}
+
+	// No argument reports status.
+	if arg == "" {
+		provider, model, credential := settings.Status()
+		m.info.Provider, m.info.Model = provider, model
+		m.addLine(m.theme.muted.Render("provider  " + orUnknown(provider)))
+		m.addLine(m.theme.muted.Render("model     " + orUnknown(model)))
+		// Status is required to return an already-masked credential.
+		m.addLine(m.theme.muted.Render("credential " + credential))
+		m.addLine(m.theme.muted.Render("stored in  " + settings.CredentialPath()))
+		return
+	}
+
+	name, value, _ := strings.Cut(arg, " ")
+	name = strings.ToLower(strings.TrimSpace(name))
+	value = strings.TrimSpace(value)
+
+	switch name {
+	case "api-key", "key":
+		m.secret = true
+		m.input = nil
+		m.notice = "paste the key; input is hidden. enter to save, esc to cancel."
+		m.addLine(m.theme.brand.Render("/openrouter api-key"))
+	case "clear-key":
+		if err := settings.ClearCredential(); err != nil {
+			m.addLine(m.theme.failure.Render("could not clear: " + err.Error()))
+			return
+		}
+		m.notice = "stored credential removed"
+		m.addLine(m.theme.muted.Render("stored credential removed"))
+	case "model":
+		if value == "" {
+			m.addLine(m.theme.failure.Render("usage: /openrouter model <model-id>"))
+			return
+		}
+		if err := settings.StoreModel(value); err != nil {
+			m.addLine(m.theme.failure.Render("could not save model: " + err.Error()))
+			return
+		}
+		m.info.Model = value
+		m.notice = "model set to " + value
+		m.addLine(m.theme.muted.Render("model set to " + value))
+	case "path":
+		m.addLine(m.theme.muted.Render(settings.CredentialPath()))
+	default:
+		m.addLine(m.theme.failure.Render("unknown option " + name + ". Try /help."))
+	}
+}
+
+// commitSecret stores a typed credential.
+//
+// The typed value is held only in m.input for the duration of entry. It is
+// cleared here, never written to m.lines, and never returned to the prompt
+// area, so it cannot reach the transcript that is sent to a model.
+func (m *model) commitSecret() (tea.Model, tea.Cmd) {
+	key := string(m.input)
+	m.input = nil
+	m.secret = false
+	if key == "" {
+		m.notice = "no key entered"
+		return m, nil
+	}
+	if err := m.info.Settings.StoreCredential(key); err != nil {
+		m.addLine(m.theme.failure.Render("could not store key: " + err.Error()))
+		m.notice = "key not stored"
+		return m, nil
+	}
+	_, _, credential := m.info.Settings.Status()
+	m.notice = "credential saved · " + credential
+	m.addLine(m.theme.brand.Render("credential saved · " + credential))
+	return m, nil
+}
+
+func orUnknown(value string) string {
+	if value == "" {
+		return "not set"
+	}
+	return value
+}
+
+const commandHelp = "  /openrouter                 show provider, model, credential, keyfile path" +
+	"\n  /openrouter api-key        store a credential (input is hidden)" +
+	"\n  /openrouter model <id>     store a model identifier" +
+	"\n  /openrouter clear-key      remove the stored credential" +
+	"\n  /openrouter path           print the keyfile path" +
+	"\n  /help                      list these commands"
 
 // note records one engine event. Events are collapsed into a compact phase
 // line rather than a growing list of dots.
@@ -386,9 +529,14 @@ func (m *model) statusLine() string {
 // structural, not decorative: it shows exactly how much room the editor has.
 func (m *model) inputBox(width int) string {
 	body := m.theme.prompt.Render("›") + " "
-	if len(m.input) == 0 && !m.running {
-		body += m.theme.muted.Render("ask about this project…")
-	} else {
+	switch {
+	case m.secret:
+		// Credential entry never renders the typed characters, not even as
+		// dots whose count would reveal the length.
+		body += m.theme.muted.Render("••••••••••••")
+	case len(m.input) == 0 && !m.running:
+		body += m.theme.muted.Render("ask about this project…  /help")
+	default:
 		body += safe(string(m.input))
 	}
 	// lipgloss Width() is the outer width, borders included. The text column is
@@ -459,8 +607,14 @@ func (m *model) prompt(width int) string {
 	b.WriteString(m.footer(width))
 	b.WriteByte('\n')
 	hint := "enter send · esc cancel run · ctrl+c quit"
-	if !m.running {
-		hint = "enter send · ctrl+c quit"
+	switch {
+	case m.secret:
+		hint = "enter save · esc cancel · input is not shown"
+	case !m.running:
+		hint = "enter send · ctrl+c quit · /help for commands"
+	}
+	if m.notice != "" {
+		hint = m.notice
 	}
 	b.WriteString(m.theme.muted.Render(truncate(hint, width-2)))
 	return b.String()

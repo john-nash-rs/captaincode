@@ -62,9 +62,20 @@ jobs:
       - run: go test -race -count=1 ./...
         env:
           CAPTAINCODE_SANDBOX_TEST: '1'
+      # Install the exact GoReleaser build the release job will use, then
+      # validate with it. Running the check through "go run" would compile
+      # GoReleaser from source, which needs Go >= 1.27.1 and fails under the
+      # project's pinned 1.26.9 toolchain. install-only keeps the check and the
+      # release on one identical binary instead of two versions that could
+      # disagree about a config.
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          install-only: true
       - name: Validate the GoReleaser configuration
-        run: |
-          go run github.com/goreleaser/goreleaser/v2@v2.18.3 check
+        run: goreleaser check
 
   release:
     name: release

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="436" viewBox="0 0 820 436" role="img" aria-label="CaptainCode terminal interface showing the startup screen">
+<rect width="820" height="436" rx="12" fill="#0d1117"/>
+<rect x="0.5" y="0.5" width="819" height="435" rx="12" fill="none" stroke="#30363d"/>
+<text x="24.0" y="24.0" fill="#cbb6ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="600" xml:space="preserve">▞▀▖      ▐     ▗    ▞▀▖     ▌   </text>
+<text x="24.0" y="44.0" fill="#cbb6ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="600" xml:space="preserve">▌  ▝▀▖▛▀▖▜▀ ▝▀▖▄ ▛▀▖▌  ▞▀▖▞▀▌▞▀▖</text>
+<text x="24.0" y="64.0" fill="#cbb6ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="600" xml:space="preserve">▌ ▖▞▀▌▙▄▘▐ ▖▞▀▌▐ ▌ ▌▌ ▖▌ ▌▌ ▌▛▀ </text>
+<text x="24.0" y="84.0" fill="#cbb6ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="600" xml:space="preserve">▝▀ ▝▀▘▌   ▀ ▝▀▘▀▘▘ ▘▝▀ ▝▀ ▝▀▘▝▀▘</text>
+<text x="24.0" y="124.0" fill="#6b7280" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">    with &lt;3 by SkillCaptain</text>
+<text x="24.0" y="144.0" fill="#cbb6ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="600" xml:space="preserve">CaptainCode</text>
+<text x="116.4" y="144.0" fill="#6b7280" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">  ·  coding agent harness</text>
+<text x="24.0" y="324.0" fill="#3a404a" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────╮</text>
+<text x="24.0" y="344.0" fill="#3a404a" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">│</text>
+<text x="32.4" y="344.0" fill="#c9d1d9" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve"> </text>
+<text x="40.8" y="344.0" fill="#7da6ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="600" xml:space="preserve">›</text>
+<text x="49.2" y="344.0" fill="#c9d1d9" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve"> </text>
+<text x="57.6" y="344.0" fill="#6b7280" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">ask about this project…  /help</text>
+<text x="309.6" y="344.0" fill="#c9d1d9" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">                                                         </text>
+<text x="788.4" y="344.0" fill="#3a404a" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">│</text>
+<text x="24.0" y="364.0" fill="#3a404a" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">╰──────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="24.0" y="384.0" fill="#6b7280" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">openrouter</text>
+<text x="108.0" y="384.0" fill="#6b7280" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve"> · </text>
+<text x="133.2" y="384.0" fill="#cbb6ff" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="600" xml:space="preserve">openrouter/free</text>
+<text x="259.2" y="384.0" fill="#6b7280" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve"> · </text>
+<text x="284.4" y="384.0" fill="#6b7280" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">read-only</text>
+<text x="24.0" y="404.0" fill="#6b7280" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" font-weight="400" xml:space="preserve">enter send · ctrl+c quit · /help for commands</text>
+</svg>

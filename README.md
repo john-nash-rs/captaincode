@@ -387,8 +387,12 @@ Releases are driven entirely by GitHub Actions. Nothing is published by hand.
 initialised — see [homebrew-tap/README.md](homebrew-tap/README.md).
 
 ```sh
-gh secret set GITHUB_PERSONAL_AUTH_TOKEN --repo john-nash-ns/captaincode
+gh secret set HOMEBREW_TAP_TOKEN --repo john-nash-ns/captaincode
 ```
+
+Use a fine-grained token with contents read-write on `homebrew-tap` only. It
+cannot be named `GITHUB_PERSONAL_AUTH_TOKEN` as some GoReleaser guides
+suggest — GitHub reserves the `GITHUB_` prefix and rejects the name.
 
 **2. Tag and push.**
 

@@ -33,9 +33,20 @@ fine-grained personal access token:
 Add it as a secret on the **captaincode** repository, not on the tap:
 
 ```sh
-gh secret set GITHUB_PERSONAL_AUTH_TOKEN --repo john-nash-rs/captaincode
+gh secret set HOMEBREW_TAP_TOKEN --repo john-nash-rs/captaincode
 gh secret list --repo john-nash-rs/captaincode
 ```
+
+> **The secret is named `HOMEBREW_TAP_TOKEN`, not `GITHUB_PERSONAL_AUTH_TOKEN`.**
+> Several GoReleaser guides suggest `GITHUB_PERSONAL_AUTH_TOKEN` for cross-
+> repository publishing, but GitHub reserves the `GITHUB_` prefix for its own
+> secrets and rejects the name outright:
+>
+> ```
+> HTTP 422: Secret names must not start with GITHUB_.
+> ```
+>
+> Do not rename it back.
 
 Without this secret, releases still publish normally. Only the cask update is
 skipped, and the workflow prints the path to the generated file.

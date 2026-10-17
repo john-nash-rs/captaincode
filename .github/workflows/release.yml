@@ -92,16 +92,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Required only for the Homebrew tap push. Scoped to that one
           # repository; grant it no other access.
-          GITHUB_PERSONAL_AUTH_TOKEN: ${{ secrets.GITHUB_PERSONAL_AUTH_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
+      # The token is passed through env and referenced as a shell variable.
+      # Interpolating ${{ secrets.* }} directly into a run block embeds the
+      # secret value in the rendered script, where a quote or $(...) in the
+      # token would break or inject into the shell.
       - name: Report cask publication status
         if: always()
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -f dist/homebrew/Casks/captaincode.rb ]; then
             echo "Cask generated at dist/homebrew/Casks/captaincode.rb"
-            if [ -z "${{ secrets.GITHUB_PERSONAL_AUTH_TOKEN }}" ]; then
+            if [ -z "$TAP_TOKEN" ]; then
               echo ""
-              echo "GITHUB_PERSONAL_AUTH_TOKEN is not configured, so the cask was"
+              echo "HOMEBREW_TAP_TOKEN is not configured, so the cask was"
               echo "NOT pushed to john-nash-rs/homebrew-tap. Copy it manually:"
               echo "  cp dist/homebrew/Casks/captaincode.rb \\"
               echo "     <homebrew-tap-repo>/Casks/captaincode.rb"

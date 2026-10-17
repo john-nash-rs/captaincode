@@ -77,14 +77,14 @@ changelog:
 #
 # Publishing to a tap needs a token with write access to that separate
 # repository. The default GITHUB_TOKEN cannot write to another repository, so
-# GITHUB_PERSONAL_AUTH_TOKEN must be configured; see homebrew-tap/README.md.
+# HOMEBREW_TAP_TOKEN must be configured; see homebrew-tap/README.md.
 # Without it the release still publishes and the formula is written to dist/.
 homebrew_casks:
   - name: captaincode
     repository:
       owner: john-nash-rs
       name: homebrew-tap
-      token: "{{ .Env.GITHUB_PERSONAL_AUTH_TOKEN }}"
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/john-nash-rs/captaincode
     description: A single-user coding-agent harness
     # GoReleaser infers the binary name from the archive contents; the

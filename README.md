@@ -10,8 +10,8 @@ an action.** Every guarantee CaptainCode makes — bounded execution, recorded
 observations, recoverable runs, visible permissions — follows from keeping that
 distinction explicit.
 
-> **Status: pre-1.0.** This is a single-operator tool, not a hosted service. It
-> is designed to be read, run, and audited. It is not hardened for
+> **Status: 0.1.0.** A single-operator tool, not a hosted service. It is
+> designed to be read, run, and audited. It is not hardened for
 > multi-tenancy or adversarial use. See [Limitations](#limitations).
 
 ![CaptainCode terminal interface](docs/tui.svg)
@@ -69,19 +69,18 @@ brew install john-nash-rs/tap/captaincode
 ### Shell installer
 
 ```sh
-curl -fsSL https://YOUR-DOMAIN/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh
 ```
 
-> **`YOUR-DOMAIN` is a placeholder.** No domain has been configured yet, so
-> that URL does not resolve. Until one is, use the repository URL:
->
-> ```sh
-> curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh
-> ```
+> **This is the current, working URL.** No custom domain has been configured,
+> so the installer is served from the repository. If one is published later,
+> `install.sh` and this section are updated together and the short form becomes
+> `curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh`.
 
-The installer downloads the archive for your platform, verifies its SHA-256
-against the release's `checksums.txt`, and only then installs it into
-`~/.local/bin`. No privileges are required.
+The installer resolves the latest release through the GitHub API, downloads
+the archive for your platform, verifies its SHA-256 against the release's
+`checksums.txt`, and only then installs it into `~/.local/bin`. No privileges
+are required.
 
 ```sh
 sh install.sh --version v0.1.0        # pin a specific version
@@ -154,7 +153,7 @@ intended behaviour, not a bug.
 
 ```sh
 brew upgrade captaincode                          # Homebrew
-curl -fsSL https://YOUR-DOMAIN/install.sh | sh    # shell installer
+curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh    # shell installer
 ```
 
 Or download the new release manually. Check [releases](https://github.com/john-nash-rs/captaincode/releases)
@@ -202,6 +201,47 @@ go build -o bin/captaincode ./cmd/captaincode
 
 A binary built this way reports `captaincode dev` and says it is an unreleased
 build. Release builds embed their version via the linker.
+
+## Troubleshooting
+
+**`command not found: captaincode`.** The install directory is not on `PATH`.
+See [PATH troubleshooting](#path-troubleshooting).
+
+**`brew install captaincode` cannot find the formula.** Confirm the tap has a
+cask for your version:
+
+```sh
+brew tap john-nash-rs/tap
+brew info captaincode
+```
+
+If the tap lists no formula, the cask has not been published for that release.
+
+**`captaincode doctor` reports the sandbox missing.** This is the expected
+result when the platform dependency is absent, not a broken install. See
+[Sandbox prerequisites](#sandbox-prerequisites). CaptainCode will not run tools
+without isolation.
+
+**Installer: `CHECKSUM MISMATCH`.** The download is corrupt or was tampered
+with. Nothing was installed. Retry, and if it persists, download manually and
+compare against the release's `checksums.txt`.
+
+**Installer: `unsupported architecture`.** There is no prebuilt binary for your
+platform. Build from source instead.
+
+**Installer: `cannot create ~/.local/bin`.** Choose a writable location:
+
+```sh
+sh install.sh --dir ~/bin
+```
+
+**Tools do not run, but `captaincode version` works.** Installing the binary
+does not install the sandbox. Run `captaincode doctor`. On Linux, install
+bubblewrap. On macOS, check that `/usr/bin/sandbox-exec` still exists — it is
+deprecated and host or MDM policy may remove it.
+
+**`database must be outside the tool workspace`.** The `--db` path resolved
+inside the directory being exposed to tools. Pick another location.
 
 ## Quick start
 
@@ -353,6 +393,20 @@ isolation cannot be established, tool execution fails — there is no fallback.
 `govulncheck` queries public vulnerability data at run time. It is dated
 evidence, not a security proof.
 
+### Continuous integration
+
+`verify.yml` runs the suite on every push across `ubuntu-22.04` and `macos-14`.
+`release.yml` gates releases: it runs the same checks, validates the GoReleaser
+configuration, and then publishes.
+
+GitHub-hosted runners cannot run every check. The sandbox probes need to build a
+network namespace and add a loopback address inside it, which the `ubuntu-24.04`
+image forbids, so the release gate uses `ubuntu-22.04`. See
+[Maintaining a release](#maintaining-a-release).
+
+Action versions are pinned to commit SHAs, not tags, so a moved tag cannot
+change what runs in CI.
+
 ## Limitations
 
 Read [LIMITATIONS.md](LIMITATIONS.md) before exposing a sensitive workspace. The
@@ -383,22 +437,33 @@ Releases are driven entirely by GitHub Actions. Nothing is published by hand.
 
 **1. Configure the token** (once). The cask is pushed to the separate
 `john-nash-rs/homebrew-tap` repository, so it needs a token the workflow's own
-`GITHUB_TOKEN` cannot provide. The tap itself already exists and is
-initialised — see [homebrew-tap/README.md](homebrew-tap/README.md).
+`GITHUB_TOKEN` cannot provide. The tap already exists and is initialised — see
+[homebrew-tap/README.md](homebrew-tap/README.md).
 
 ```sh
-gh secret set HOMEBREW_TAP_TOKEN --repo john-nash-ns/captaincode
+gh secret set HOMEBREW_TAP_TOKEN --repo john-nash-rs/captaincode
 ```
 
 Use a fine-grained token with contents read-write on `homebrew-tap` only. It
 cannot be named `GITHUB_PERSONAL_AUTH_TOKEN` as some GoReleaser guides
 suggest — GitHub reserves the `GITHUB_` prefix and rejects the name.
 
+Verify the token without pasting it into a chat or a file:
+
+```sh
+read -s TOKEN && echo
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
+  https://api.github.com/repos/john-nash-rs/homebrew-tap
+```
+
+`200` works. `401` means GitHub does not recognise the value at all — wrong,
+revoked, or expired. `403` means it is valid but lacks write access.
+
 **2. Tag and push.**
 
 ```sh
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0
 ```
 
 The workflow runs tests, validates the GoReleaser config, builds all four
@@ -413,5 +478,41 @@ ls dist/
 sh -cd dist && shasum -a 256 -c checksums.txt
 ```
 
-**Uninstalling a bad release.** GoHub Releases are immutable once published by
-default; delete the tag and the release, then publish a corrected version.
+### Things that will bite you
+
+Every item here was hit while publishing 0.1.0. They are properties of the
+environment, not of this code.
+
+**Releases cannot be re-run.** GitHub rejects a second upload of an asset that
+already exists, and the failure happens before the cask is pushed:
+
+```
+422 Validation Failed [{Resource:ReleaseAsset Field:name Code:already_exists}]
+```
+
+So re-running the workflow is not a way to repair a broken cask. To re-release
+the same version, delete the assets or the release first:
+
+```sh
+gh release delete v0.2.0 --repo john-nash-rs/captaincode --yes
+git push origin :refs/tags/v0.2.0
+```
+
+That leaves a window with no binaries, so prefer a new version number.
+
+**A failed cask push does not roll back the release.** On 0.1.0 the archives
+published successfully and only the tap push failed; the release stayed live
+while the workflow reported failure. Publish the cask by hand from `dist/` and
+nothing is lost.
+
+**The verify gate cannot run on `ubuntu-24.04`.** The sandbox probes build a
+network namespace and add a loopback address inside it, and that runner image
+runs jobs in a container which forbids `RTM_NEWADDR`, so bubblewrap fails with
+`Failed RTM_NEWADDR: Operation not permitted`. The gate runs on `ubuntu-22.04`
+for that reason. Do not bump it without moving to a runner that permits these
+namespaces.
+
+**Do not validate the config with `go run`.** GoReleaser 2.18.3 requires Go
+1.27.1 or newer, and the project pins Go 1.26.9 with `GOTOOLCHAIN=local`. The
+workflow installs GoReleaser as a binary in `install-only` mode instead, so one
+version both validates the configuration and performs the release.

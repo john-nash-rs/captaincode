@@ -119,8 +119,8 @@ release:
     ## Install
 
     ```
-    curl -fsSL https://YOUR-DOMAIN/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh
     ```
 
-    Replace YOUR-DOMAIN with the published installer host before distributing
-    this release.
+    The installer resolves the latest release, verifies the archive against
+    checksums.txt, and installs to ~/.local/bin without privileges.

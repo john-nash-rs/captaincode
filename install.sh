@@ -5,10 +5,10 @@
 # the published checksums file, and installs the binary into a user-writable
 # directory. No privileges are required for a default install.
 #
-#   curl -fsSL https://YOUR-DOMAIN/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh
 #
-# Replace YOUR-DOMAIN with the published installer host. Until a domain is
-# configured, fetch it from the repository instead:
+# This script is served from the repository. If a custom domain is configured
+# later, it and this header are updated together.
 #
 #   curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh
 #
@@ -19,7 +19,7 @@
 # Mitigations, in decreasing order of preference:
 #
 #   1. Download, read, then run:
-#          curl -fsSLO https://YOUR-DOMAIN/install.sh
+#          curl -fsSLO https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh
 #          less install.sh
 #          sh install.sh
 #   2. Pin the version being installed:  sh install.sh --version v0.1.0
@@ -65,9 +65,9 @@ Environment:
   CAPTAINCODE_INSTALL_DIR   Same as --dir
 
 Examples:
-  curl -fsSL https://YOUR-DOMAIN/install.sh | sh
-  curl -fsSL https://YOUR-DOMAIN/install.sh | sh -s -- --dir /usr/local/bin
-  curl -fsSL https://YOUR-DOMAIN/install.sh | sh -s -- --version v0.1.0
+  curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh -s -- --dir /usr/local/bin
+  curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh -s -- --version v0.1.0
 USAGE
 }
 

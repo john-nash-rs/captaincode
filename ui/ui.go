@@ -72,6 +72,7 @@ type model struct {
 	// Presentation state. None of it affects harness behavior.
 	info          Info
 	theme         theme
+	showArt       bool
 	width, height int
 	phase         string
 	started       time.Time
@@ -119,12 +120,13 @@ func newTheme(enabled bool) theme {
 func Run(runner Runner, info Info) error {
 	paint := newTheme(colorEnabled())
 	m := &model{
-		runner: runner,
-		info:   info,
-		theme:  paint,
-		lines:  []string{banner(paint)},
-		width:  80,
-		height: 24,
+		runner:  runner,
+		info:    info,
+		theme:   paint,
+		showArt: true,
+		lines:   []string{banner(paint, 80)},
+		width:   80,
+		height:  24,
 	}
 	program := tea.NewProgram(m)
 	m.send = program.Send
@@ -154,6 +156,7 @@ func (m *model) start() tea.Cmd {
 	m.cancel = cancel
 	m.started = time.Now()
 	m.phase = "starting"
+	m.showArt = false
 	m.addLine(m.theme.user.Render(question))
 	return func() tea.Msg {
 		text, err := m.runner(ctx, question, func(event core.Event) { m.send(progress{generation, event}) })
@@ -294,9 +297,13 @@ func (m *model) View() tea.View {
 	bottom.WriteString(m.prompt(width))
 	bottomRows := strings.Count(bottom.String(), "\n") + 1
 
-	// Transcript gets whatever rows remain, minus one filler row so the blocks
-	// never collide on a short terminal.
-	budget := height - bottomRows - 1
+	// The splash occupies transcript rows while it is shown, so it has to come
+	// out of the budget before the conversation is laid out.
+	var head []string
+	if m.showArt {
+		head = splash(m.theme, width)
+	}
+	budget := height - bottomRows - 1 - len(head)
 	if budget < 1 {
 		budget = 1
 	}
@@ -304,7 +311,7 @@ func (m *model) View() tea.View {
 
 	var b strings.Builder
 	rows := 0
-	for _, line := range visible {
+	for _, line := range append(head, visible...) {
 		wrapped := clip(line, width)
 		b.WriteString(wrapped)
 		b.WriteByte('\n')
@@ -468,9 +475,60 @@ func (m *model) addLine(line string) {
 	}
 }
 
-// banner is the greeting shown before the first prompt.
-func banner(paint theme) string {
-	return paint.brand.Render("CaptainCode") + paint.muted.Render("  ·  coding agent harness")
+// banner is the one-line greeting. It shortens rather than wrapping, because
+// a wrapped brand line reads as a layout bug rather than a design.
+func banner(paint theme, width int) string {
+	name, suffix := "CaptainCode", "  ·  coding agent harness"
+	if lipgloss.Width(name+suffix) > width {
+		return paint.brand.Render(truncate(name, width))
+	}
+	return paint.brand.Render(name) + paint.muted.Render(suffix)
+}
+
+// asciiArt is the full-screen splash. It is decorative, so it is only drawn
+// when the terminal is wide enough to show it without wrapping, and it is
+// replaced by the one-line banner once the first run starts.
+var asciiArt = []string{
+	` ██████╗ █████╗ ██████╗ ████████╗ ██╗██╗   ██╗`,
+	`██╔════╝██╔══██╗██╔═══██╗╚══██╔══╝██║██║   ██║`,
+	`██║     ███████║██║   ██║   ██║   ██║██║   ██║`,
+	`██║     ██╔══██║██║   ██║   ██║   ██║██║   ██║`,
+	`╚██████╗██║  ██║╚██████╔╝   ██║   ╚██████╔╝`,
+	` ╚═════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝    ╚═════╝ `,
+}
+
+const tagline = "with <3 by SkillCaptain"
+
+// artWidth is the widest row of asciiArt, which is what decides whether the
+// terminal can show it unwrapped.
+var artWidth = func() int {
+	w := 0
+	for _, line := range asciiArt {
+		if n := lipgloss.Width(line); n > w {
+			w = n
+		}
+	}
+	return w
+}()
+
+// splash returns the startup rows: the artwork when it fits, otherwise the
+// compact one-line banner. Narrow terminals get the banner rather than a
+// wrapped, broken drawing.
+func splash(paint theme, width int) []string {
+	if width < artWidth {
+		return []string{banner(paint, width)}
+	}
+	rows := make([]string, 0, len(asciiArt)+2)
+	for _, line := range asciiArt {
+		rows = append(rows, paint.brand.Render(line))
+	}
+	// Centre the tagline under the artwork.
+	pad := (artWidth - lipgloss.Width(tagline)) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	rows = append(rows, "", paint.muted.Render(strings.Repeat(" ", pad)+tagline))
+	return rows
 }
 
 // boxChrome is the width the border and padding consume around the editor text.

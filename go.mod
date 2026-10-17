@@ -4,6 +4,7 @@ go 1.26.9
 
 require (
 	charm.land/bubbletea/v2 v2.1.0
+	charm.land/lipgloss/v2 v2.0.6
 	github.com/OpenRouterTeam/go-sdk v0.9.61
 	modernc.org/sqlite v1.60.1
 )

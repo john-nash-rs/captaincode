@@ -152,7 +152,15 @@ func run() error {
 		return fmt.Sprintf("%s\nRun: %s", state.Messages[len(state.Messages)-1].Content, state.ID), nil
 	}
 	if *tui {
-		return ui.Run(runOne)
+		// The interface reports the resolved provider, model, and grants so it
+		// never has to infer them. Passing them keeps that dependency explicit.
+		return ui.Run(runOne, ui.Info{
+			Provider:      *providerName,
+			Model:         cfg.Model,
+			Workspace:     *workspace,
+			AllowWrites:   cfg.AllowWrites,
+			AllowCommands: cfg.AllowCommands,
+		})
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

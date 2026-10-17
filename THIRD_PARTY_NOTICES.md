@@ -5,6 +5,7 @@ Inspected 17 October 2026. This records upstream license files, not a legal opin
 | Module | Version | Inspected license files |
 |---|---|---|
 | charm.land/bubbletea/v2 | v2.1.0 | [LICENSE](third_party_licenses/charm.land_bubbletea_v2__LICENSE) |
+| charm.land/lipgloss/v2 | v2.0.6 | [LICENSE](third_party_licenses/charm.land_lipgloss_v2__LICENSE) |
 | github.com/OpenRouterTeam/go-sdk | v0.9.61 | [LICENSE](third_party_licenses/github.com_OpenRouterTeam_go-sdk__LICENSE) |
 | github.com/aymanbagabas/go-udiff | v0.2.0 | [LICENSE-BSD](third_party_licenses/github.com_aymanbagabas_go-udiff__LICENSE-BSD), [LICENSE-MIT](third_party_licenses/github.com_aymanbagabas_go-udiff__LICENSE-MIT) |
 | github.com/bits-and-blooms/bitset | v1.24.6 | [LICENSE](third_party_licenses/github.com_bits-and-blooms_bitset__LICENSE) |

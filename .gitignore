@@ -1,0 +1,7 @@
+bin/
+*.db
+*.db-shm
+*.db-wal
+*.db.lock
+.env
+config.local.json

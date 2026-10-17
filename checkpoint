@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+chapter=${1:-02}
+case "$chapter" in
+  01|1|02|2) go test ./checkpoints/02-loop; go run ./checkpoints/02-loop/demo ;;
+  03|3) go test ./toolbox ;;
+  04|4) go test ./labs/retry ;;
+  05|5) go test ./labs/retry ./core ;;
+  06|6) go test ./core -run Context ;;
+  07|7) go test ./toolbox ./evals ;;
+  08|8) AGENTBOOK_SANDBOX_TEST=1 go test -count=1 ./sandbox ;;
+  09|9) go test ./provider ;;
+  10) go test ./labs/orders ;;
+  11) go test ./storage ;;
+  12) go test ./core ./evals ;;
+  13) go test ./labs/scheduler ;;
+  14) go test ./config ./evals ;;
+  15) go test ./evals ;;
+  16) go test ./ui ;;
+  17) go test ./toolbox ./core ;;
+  18) go test ./...; go build -o bin/agentbook ./cmd/agentbook ;;
+  *) printf 'Choose a chapter number from 01 to 18.\n' >&2; exit 2 ;;
+esac

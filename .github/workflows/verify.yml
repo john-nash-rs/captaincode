@@ -1,0 +1,28 @@
+name: verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.9'
+          cache: true
+      - name: Install Linux sandbox dependency
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap curl
+      - run: go mod verify
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+        env:
+          AGENTBOOK_SANDBOX_TEST: '1'
+      - run: go build -o bin/agentbook ./cmd/agentbook
+      - name: Offline CLI smoke
+        run: ./bin/agentbook --workspace ./testdata/project --db "$RUNNER_TEMP/agentbook-smoke.db"

@@ -1,0 +1,10 @@
+{
+  "max_turns": 12,
+  "max_tool_calls": 24,
+  "context_bytes": 65536,
+  "output_bytes": 8192,
+  "tool_timeout_seconds": 15,
+  "run_timeout_seconds": 180,
+  "allow_writes": false,
+  "allow_commands": false
+}

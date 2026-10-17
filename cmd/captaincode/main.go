@@ -1,14 +1,17 @@
+// Package main is the CaptainCode command-line entry point.
+//
+// This file holds argument handling and top-level wiring only. Subcommands
+// that need to report on the environment live in their own file so the
+// critical worker path below stays short and auditable.
 package main
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -25,6 +28,14 @@ import (
 	"github.com/john-nash-rs/captaincode/ui"
 )
 
+// version is the release identifier. Release builds overwrite it with the
+// linker flag -X main.version=<tag>; a plain "go build" leaves it as "dev" so
+// an unreleased binary is never mistaken for a published one.
+var version = "dev"
+
+// commit is set the same way and identifies the exact source revision.
+var commit = "unknown"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "captaincode:", err)
@@ -32,21 +43,26 @@ func main() {
 	}
 }
 
+// run dispatches a subcommand, then falls back to the one-shot and terminal
+// interfaces.
+//
+// The worker subcommand must stay first and must stay reachable without any
+// flag parsing. The sandbox re-executes this same binary to run a tool, and it
+// passes no arguments other than "worker". A regression here would break every
+// tool execution while leaving the rest of the suite green.
 func run() error {
-	if len(os.Args) > 1 && os.Args[1] == "worker" {
-		var envelope sandbox.Envelope
-		data, err := io.ReadAll(io.LimitReader(os.Stdin, 65537))
-		if err != nil {
-			return err
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "worker":
+			return runWorker()
+		case "doctor":
+			return runDoctor(os.Args[2:])
+		case "version":
+			printVersion(os.Stdout)
+			return nil
 		}
-		if len(data) > 65536 {
-			return errors.New("worker request too large")
-		}
-		if err := json.Unmarshal(data, &envelope); err != nil {
-			return err
-		}
-		return json.NewEncoder(os.Stdout).Encode(envelope.Registry.Execute(context.Background(), envelope.Call))
 	}
+
 	workspace := flag.String("workspace", "", "project directory (required)")
 	databasePath := flag.String("db", "", "SQLite path outside the project")
 	configPath := flag.String("config", "", "explicit user configuration JSON")
@@ -55,8 +71,16 @@ func run() error {
 	resume := flag.String("resume", "", "resume an interrupted run by ID")
 	tui := flag.Bool("tui", false, "open terminal interface")
 	stream := flag.Bool("stream", false, "assemble streamed provider responses")
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Usage = usage
 	flag.Parse()
+
+	if *showVersion {
+		printVersion(os.Stdout)
+		return nil
+	}
 	if *workspace == "" {
+		flag.Usage()
 		return errors.New("provide --workspace with a project you intend to expose")
 	}
 	root, err := filepath.Abs(*workspace)

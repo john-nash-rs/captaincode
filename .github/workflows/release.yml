@@ -1,0 +1,111 @@
+# Release workflow.
+#
+# Triggered by pushing a version tag (vX.Y.Z). Runs the full test suite, then
+# builds and publishes signed-by-checksum artifacts for every supported target,
+# then updates the Homebrew cask in the tap repository.
+#
+# Action versions are pinned to commit SHAs rather than tags so a compromised or
+# moved tag cannot change what runs here. Each SHA below was resolved from the
+# corresponding release tag and verified to be a commit, not a tag object.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Allows a dry run from the Actions tab without publishing anything.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (e.g. v0.1.0)'
+        required: true
+
+# Least privilege by default. The release job needs more, and declares it.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: '1.26.9'
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install Linux sandbox dependency
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap curl
+      - run: go mod verify
+      - run: gofmt -l . && test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+        env:
+          CAPTAINCODE_SANDBOX_TEST: '1'
+      - name: Validate the GoReleaser configuration
+        run: |
+          go run github.com/goreleaser/goreleaser/v2@v2.18.3 check
+
+  release:
+    name: release
+    needs: verify
+    runs-on: ubuntu-24.04
+    # Only the release job may write. contents:write is required to create the
+    # GitHub Release and upload artifacts. Nothing else is granted.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          tag: ${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build the release artifacts locally as a sanity check
+        run: |
+          go build -trimpath -ldflags "-s -w -X main.version=${{ inputs.tag || github.ref_name }}" \
+            -o ./dist-check/captaincode ./cmd/captaincode
+          ./dist-check/captaincode version
+          rm -rf ./dist-check
+
+      # The tap repository is a separate repository. GITHUB_TOKEN cannot write
+      # to it, so publishing the cask requires a token with write access to
+      # john-nash-rs/homebrew-tap. If the secret is absent the release still
+      # publishes; only the cask update is skipped, and it says so.
+      - name: Publish the release and update the Homebrew cask
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required only for the Homebrew tap push. Scoped to that one
+          # repository; grant it no other access.
+          GITHUB_PERSONAL_AUTH_TOKEN: ${{ secrets.GITHUB_PERSONAL_AUTH_TOKEN }}
+
+      - name: Report cask publication status
+        if: always()
+        run: |
+          if [ -f dist/homebrew/Casks/captaincode.rb ]; then
+            echo "Cask generated at dist/homebrew/Casks/captaincode.rb"
+            if [ -z "${{ secrets.GITHUB_PERSONAL_AUTH_TOKEN }}" ]; then
+              echo ""
+              echo "GITHUB_PERSONAL_AUTH_TOKEN is not configured, so the cask was"
+              echo "NOT pushed to john-nash-rs/homebrew-tap. Copy it manually:"
+              echo "  cp dist/homebrew/Casks/captaincode.rb \\"
+              echo "     <homebrew-tap-repo>/Casks/captaincode.rb"
+            else
+              echo "Cask pushed to the tap repository."
+            fi
+          fi

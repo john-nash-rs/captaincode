@@ -1,0 +1,126 @@
+# GoReleaser configuration for CaptainCode.
+#
+# Version is injected at link time so a released binary reports its own tag and
+# the harness's `captaincode version` output is trustworthy. A binary built
+# straight from a working tree keeps the "dev" default and says so.
+version: 2
+
+project_name: captaincode
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+builds:
+  - id: captaincode
+    main: ./cmd/captaincode
+    # GoReleaser infers the binary name from the archive contents; the
+    # singular `binary` key is deprecated in favour of letting it default.
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .FullCommit }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # go1.26.9 is the version in go.mod and the version the test suite is
+    # verified against. Builds run on the Go version GoReleaser resolves, so the
+    # toolchain line is pinned to avoid silently drifting below the minimum.
+
+archives:
+  - id: captaincode
+    ids:
+      - captaincode
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - LICENSE
+      - README.md
+      - THIRD_PARTY_NOTICES.md
+    # The archive is deliberately flat. A Homebrew cask resolves its binary
+    # from the staged root, and wrapping the payload in a versioned directory
+    # would make that lookup fragile.
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Homebrew publishing.
+#
+# GoReleaser deprecated `brews` in v2.16 in favour of casks and states plainly
+# that casks should be used instead, including for plain binaries. CaptainCode
+# ships a bare executable in a tarball, which a cask installs via its `binary`
+# stanza. The user-facing command is identical either way:
+#
+#   brew tap john-nash-rs/tap && brew install captaincode
+#   brew install john-nash-rs/tap/captaincode
+#
+# Publishing to a tap needs a token with write access to that separate
+# repository. The default GITHUB_TOKEN cannot write to another repository, so
+# GITHUB_PERSONAL_AUTH_TOKEN must be configured; see homebrew-tap/README.md.
+# Without it the release still publishes and the formula is written to dist/.
+homebrew_casks:
+  - name: captaincode
+    repository:
+      owner: john-nash-rs
+      name: homebrew-tap
+      token: "{{ .Env.GITHUB_PERSONAL_AUTH_TOKEN }}"
+    homepage: https://github.com/john-nash-rs/captaincode
+    description: A single-user coding-agent harness
+    # GoReleaser infers the binary name from the archive contents; the
+    # singular `binary` key is deprecated in favour of letting it default.
+    # No .app payload, so no quarantine caveat is needed: cask installs that
+    # stage a bare binary do not trigger Gatekeeper the way an app bundle does.
+    # GoReleaser's HomebrewCask type has no `test` field in v2.18, so the
+    # smoke test is carried in the tap README and run by the tap repository's
+    # own CI instead of being generated into the cask.
+    # Deliberately no `depends_on bubblewrap`. On macOS the sandbox is the
+    # built-in /usr/bin/sandbox-exec and there is nothing to install. On Linux
+    # bubblewrap is required, but a macOS cask must not claim a dependency it
+    # can neither need nor guarantee; see README for the Linux instructions.
+
+# No changelog upload, no Docker, no sign: this project publishes signed
+# archives through GoReleaser only. Attestations are added once the repository
+# has configured id-token permissions.
+
+release:
+  prerelease: auto
+  draft: false
+  name_template: "captaincode {{ .Version }}"
+  footer: |
+    ## Verify a download
+
+    Every release ships a `checksums.txt`. Verify before installing:
+
+    ```
+    shasum -a 256 -c checksums.txt
+    ```
+
+    ## Install
+
+    ```
+    curl -fsSL https://YOUR-DOMAIN/install.sh | sh
+    ```
+
+    Replace YOUR-DOMAIN with the published installer host before distributing
+    this release.

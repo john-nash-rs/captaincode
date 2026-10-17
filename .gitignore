@@ -5,3 +5,11 @@ bin/
 *.db.lock
 .env
 config.local.json
+
+# Release artifacts
+/dist/
+/homebrew-tap/Casks/*.rb
+!homebrew-tap/Casks/*.rb.example
+
+# Stray build output at the repo root
+/captaincode

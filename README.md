@@ -52,26 +52,161 @@ an error, never a quiet downgrade to something less safe.
 records it as unknown. A lost HTTP reply after a commit does not become a retry;
 it becomes a blocked run that requires a human.
 
-## Requirements
+## Installation
 
-- **Go 1.26.9** (the minimum in `go.mod`) on macOS or Linux
-- **macOS:** `/usr/bin/sandbox-exec` — deprecated by Apple, but functional
-- **Linux:** `bubblewrap` (`bwrap`) and the user-namespace operations it needs
-  ```sh
-  sudo apt-get install bubblewrap
-  ```
-- Windows is **not supported** by the native worker or the database lock.
+### Homebrew
 
-No paid model account is required. The default provider is a deterministic
-offline fixture.
+```sh
+brew tap john-nash-rs/tap && brew install captaincode
+```
+
+Or without tapping first:
+
+```sh
+brew install john-nash-rs/tap/captaincode
+```
+
+### Shell installer
+
+```sh
+curl -fsSL https://YOUR-DOMAIN/install.sh | sh
+```
+
+> **`YOUR-DOMAIN` is a placeholder.** No domain has been configured yet, so
+> that URL does not resolve. Until one is, use the repository URL:
+>
+> ```sh
+> curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh
+> ```
+
+The installer downloads the archive for your platform, verifies its SHA-256
+against the release's `checksums.txt`, and only then installs it into
+`~/.local/bin`. No privileges are required.
+
+```sh
+sh install.sh --version v0.1.0        # pin a specific version
+sh install.sh --dir ~/bin            # choose the install directory
+sh install.sh --help
+```
+
+> **Risk of piping a remote script into a shell.** This executes whatever the
+> remote host serves, with your privileges, before you read any of it. Prefer
+> downloading and reading it first:
+>
+> ```sh
+> curl -fsSLO https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh
+> less install.sh
+> sh install.sh
+> ```
+
+### Manual download
+
+Grab the archive and `checksums.txt` from
+[GitHub Releases](https://github.com/john-nash-rs/captaincode/releases):
+
+```sh
+VERSION=v0.1.0
+curl -fsSLO "https://github.com/john-nash-rs/captaincode/releases/download/$VERSION/captaincode_${VERSION#v}_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+curl -fsSLO "https://github.com/john-nash-rs/captaincode/releases/download/$VERSION/checksums.txt"
+shasum -a 256 -c checksums.txt
+tar -xzf captaincode_*.tar.gz
+sudo mv captaincode /usr/local/bin/   # or ~/.local/bin, no sudo needed
+```
+
+**Verify the checksum before running anything.** A mismatch means the download
+is corrupt or was tampered with.
+
+### Supported platforms
+
+| OS | Architectures |
+|---|---|
+| macOS | `arm64` (Apple Silicon), `amd64` (Intel) |
+| Linux | `amd64` (x86-64), `arm64` (aarch64) |
+
+Linux requires kernel **3.10+**. Windows is not supported.
+
+### Verify the installation
+
+```sh
+captaincode version
+captaincode --version
+captaincode doctor
+captaincode --help
+```
+
+`doctor` checks that the sandbox backend this platform needs is present. It
+reports and never repairs: CaptainCode refuses to run tools without isolation
+rather than falling back to running them unsandboxed.
+
+### Sandbox prerequisites
+
+Installing the binary does **not** install its sandbox dependency.
+
+| Platform | Backend | Action |
+|---|---|---|
+| macOS | `/usr/bin/sandbox-exec` | Ships with the OS. Deprecated by Apple; host or MDM policy may remove it. |
+| Linux | `bubblewrap` (`bwrap`) | `sudo apt-get install bubblewrap`, plus unprivileged user namespaces |
+
+If `doctor` reports a missing sandbox, tools will not run. That is the
+intended behaviour, not a bug.
+
+### Upgrade
+
+```sh
+brew upgrade captaincode                          # Homebrew
+curl -fsSL https://YOUR-DOMAIN/install.sh | sh    # shell installer
+```
+
+Or download the new release manually. Check [releases](https://github.com/john-nash-rs/captaincode/releases)
+for what changed.
+
+### Uninstall
+
+```sh
+brew uninstall captaincode                        # Homebrew
+rm ~/.local/bin/captaincode                       # shell installer
+```
+
+Optional state also lives outside the binary and is **not** removed by
+uninstalling:
+
+```sh
+rm ~/.config/captaincode/sessions.db     # session database
+rm ~/.config/captaincode/openrouter.key  # stored credential
+```
+
+Remove the credential file if you are uninstalling for security reasons.
+
+### PATH troubleshooting
+
+`command not found: captaincode` after installing means the install directory
+is not on `PATH`. The installer prints the exact line to add. For `~/.local/bin`:
+
+```sh
+sh   -c 'echo "export PATH=\"$HOME/.local/bin:$PATH\"" >> ~/.profile'
+zsh  -c 'echo "export PATH=\"$HOME/.local/bin:$PATH\"" >> ~/.zshrc'
+bash -c 'echo "export PATH=\"$HOME/.local/bin:$PATH\"" >> ~/.bashrc'
+```
+
+Then open a new shell. Confirm with `captaincode version`.
+
+### Build from source
+
+```sh
+git clone https://github.com/john-nash-rs/captaincode.git
+cd captaincode
+go mod download
+go test ./...
+go build -o bin/captaincode ./cmd/captaincode
+```
+
+A binary built this way reports `captaincode dev` and says it is an unreleased
+build. Release builds embed their version via the linker.
 
 ## Quick start
 
 ```sh
-go mod download
-go test ./...
-go build -o bin/captaincode ./cmd/captaincode
-./bin/captaincode --workspace ./testdata/project --db /tmp/captaincode-demo.db
+captaincode --workspace ./testdata/project --db /tmp/captaincode-demo.db
 ```
 
 ```
@@ -236,9 +371,45 @@ material ones:
 
 ## License
 
-The project ships under a license that has not yet been finalized for public
-distribution. Dependency licenses are inventoried in
+MIT — see [LICENSE](LICENSE). Dependency licenses are inventoried in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Third-party components retain their own licenses. CaptainCode is not affiliated
-with or endorsed by OpenRouter, Anthropic, or any model provider.
+CaptainCode is not affiliated with or endorsed by OpenRouter, Anthropic, or any
+model provider.
+
+## Maintaining a release
+
+Releases are driven entirely by GitHub Actions. Nothing is published by hand.
+
+**1. Prepare the tap** (once). See
+[homebrew-tap/README.md](homebrew-tap/README.md) for the exact commands.
+
+**2. Configure the token** (once). The cask is pushed to a *separate*
+repository, so it needs a token the workflow's own `GITHUB_TOKEN` cannot
+provide:
+
+```sh
+gh secret set GITHUB_PERSONAL_AUTH_TOKEN --repo john-nash-ns/captaincode
+```
+
+**3. Tag and push.**
+
+```sh
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+The workflow runs tests, validates the GoReleaser config, builds all four
+targets, publishes the archives with `checksums.txt`, and updates the cask.
+
+**Verifying without publishing.** Build the exact artifacts locally:
+
+```sh
+goreleaser check
+goreleaser release --snapshot --clean --skip=publish
+ls dist/
+sh -cd dist && shasum -a 256 -c checksums.txt
+```
+
+**Uninstalling a bad release.** GoHub Releases are immutable once published by
+default; delete the tag and the release, then publish a corrected version.

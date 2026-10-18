@@ -219,6 +219,51 @@ func TestFooterDoesNotClaimAConnectionItHasNotMade(t *testing.T) {
 	}
 }
 
+// A configured machine must never be told it is offline.
+//
+// This exact line — "fixture · offline, no model needed · ready · read-only"
+// — was read by a user who had a key and a model set up and reasonably expected
+// them to be in force. The footer was right about the provider it was told
+// about and the provider default was wrong, so the fix belongs here as much as
+// in the resolver: whatever the provider is, the footer must name it honestly.
+func TestFooterNamesTheProviderActuallyInForce(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, model string
+		want, absent          string
+	}{
+		{
+			name: "hosted", provider: "openrouter", model: "z-ai/glm-5.3",
+			want: "z-ai/glm-5.3", absent: "offline",
+		},
+		{
+			// Honest, and the reason the default was wrong when it appeared
+			// on a configured machine.
+			name: "offline", provider: "fixture", model: "z-ai/glm-5.3",
+			want: "offline, no model needed", absent: "z-ai/glm-5.3",
+		},
+		{
+			name: "hosted with no model", provider: "openrouter", model: "",
+			want: "no model configured", absent: "offline",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newCmdModel(&fakeSettings{})
+			m.info.Provider = tc.provider
+			m.info.Model = tc.model
+			footer := m.footer(80)
+			if !strings.Contains(footer, tc.want) {
+				t.Errorf("footer does not say %q:\n%s", tc.want, footer)
+			}
+			if strings.Contains(footer, tc.absent) {
+				t.Errorf("footer wrongly says %q:\n%s", tc.absent, footer)
+			}
+			if !strings.Contains(footer, tc.provider) {
+				t.Errorf("footer does not name the provider %q:\n%s", tc.provider, footer)
+			}
+		})
+	}
+}
+
 func TestStatusRunsACheckRatherThanOnlyReadingTheFile(t *testing.T) {
 	s := &fakeSettings{model: "openrouter/free", stored: "sk-or-v1-KEY"}
 	p := &fakeProbe{}

@@ -89,7 +89,16 @@ func run() error {
 	databasePath := flags.String("db", "", "SQLite path outside the project (default: per workspace)")
 	configPath := flags.String("config", "", "explicit user configuration JSON")
 	model := flags.String("model", "", "provider model identifier (overrides the configuration for one run)")
-	providerName := flags.String("provider", "fixture", "fixture or openrouter")
+	// The provider is not defaulted to a fixed name here. It is resolved after
+	// configuration is read, so a machine that has already been set up uses the
+	// hosted provider without anyone remembering a flag.
+	//
+	// Defaulting to "fixture" was the original choice and it was wrong twice over:
+	// someone who had configured a key and a model was told they had no model and
+	// no write tools, because the offline provider was in charge and it has
+	// neither. The offline provider is now the fallback for a machine that has
+	// nothing configured, which is the only case where it is what was wanted.
+	providerFlag := flags.String("provider", "", "fixture or openrouter (default openrouter once configured, else fixture)")
 	question := flags.String("question", "What is the project version?", "user request")
 	resume := flags.String("resume", "", "resume an interrupted run by ID")
 	ide := flags.Bool("ide", true, "open the terminal interface (default true; use --ide=false for one-shot)")
@@ -143,6 +152,16 @@ func run() error {
 		cfg.Model = *model
 	}
 
+	// With no --provider given, a machine that has been set up uses the hosted
+	// provider and one that has not falls back to the offline fixture.
+	//
+	// The decision needs both a model and a credential. Either alone is a half
+	// setup that cannot work, and silently choosing the offline provider there
+	// produces the confusing case where a configured machine behaves as though
+	// nothing was ever configured.
+	credential, credentialErr := keyring.Resolve()
+	providerName := resolveProvider(*providerFlag, cfg.Model, credential, credentialErr)
+
 	if *databasePath == "" {
 		if *databasePath, err = defaultDatabasePath(root); err != nil {
 			return err
@@ -180,7 +199,7 @@ func run() error {
 	}
 	// Built before the provider so the model can be read per request, which is
 	// what lets /openrouter model apply without a restart.
-	settings, err := newSettings(configFile, *providerName, cfg.Model, cfg.AllowWrites, cfg.AllowCommands)
+	settings, err := newSettings(configFile, providerName, cfg.Model, cfg.AllowWrites, cfg.AllowCommands)
 	if err != nil {
 		return err
 	}
@@ -189,7 +208,7 @@ func run() error {
 	// nil for the fixture provider, which needs neither a key nor a check.
 	var connectivity ui.Probe
 	var catalogue ui.Browser
-	switch *providerName {
+	switch providerName {
 	case "fixture":
 		fmt.Fprintln(os.Stderr, "Deterministic fixture: supports the package.json version task only.")
 	case "openrouter":
@@ -261,7 +280,7 @@ func run() error {
 		// The interface reports the resolved provider, model, and grants so it
 		// never has to infer them. Passing them keeps that dependency explicit.
 		return ui.Run(runOne, ui.Info{
-			Provider:      *providerName,
+			Provider:      providerName,
 			Model:         settings.Model(),
 			Workspace:     *workspace,
 			AllowWrites:   cfg.AllowWrites,

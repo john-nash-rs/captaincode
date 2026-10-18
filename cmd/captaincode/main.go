@@ -63,26 +63,56 @@ func run() error {
 		}
 	}
 
-	workspace := flag.String("workspace", "", "project directory (required)")
-	databasePath := flag.String("db", "", "SQLite path outside the project")
-	configPath := flag.String("config", "", "explicit user configuration JSON")
-	providerName := flag.String("provider", "fixture", "fixture or openrouter")
-	question := flag.String("question", "What is the project version?", "user request")
-	resume := flag.String("resume", "", "resume an interrupted run by ID")
-	tui := flag.Bool("tui", false, "open terminal interface")
-	stream := flag.Bool("stream", false, "assemble streamed provider responses")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Usage = usage
-	flag.Parse()
+	// --tui selected the interface when it was opt-in. It is now the default,
+	// so the flag is removed. Catch it before parsing: the flag package would
+	// otherwise print "flag provided but not defined" and dump the whole usage
+	// text, which sends people looking for a typo instead of telling them what
+	// changed.
+	for _, a := range os.Args[1:] {
+		if flagName(a) == "tui" {
+			return errors.New("--tui was removed: the interface is now the default.\n  use: captaincode .\n  for one-shot output: captaincode --ide=false .")
+		}
+	}
+
+	flags := newFlagSet("captaincode")
+	flags.SetOutput(stderr())
+	workspace := flags.String("workspace", "", "project directory (may also be given as the first argument)")
+	databasePath := flags.String("db", "", "SQLite path outside the project (default: per workspace)")
+	configPath := flags.String("config", "", "explicit user configuration JSON")
+	providerName := flags.String("provider", "fixture", "fixture or openrouter")
+	question := flags.String("question", "What is the project version?", "user request")
+	resume := flags.String("resume", "", "resume an interrupted run by ID")
+	ide := flags.Bool("ide", true, "open the terminal interface (default true; use --ide=false for one-shot)")
+	stream := flags.Bool("stream", false, "assemble streamed provider responses")
+	showVersion := flags.Bool("version", false, "print version and exit")
+	flags.Usage = func() { usage(flags) }
+	if err := flags.Parse(permuteArgs(os.Args[1:])); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return fmt.Errorf("%w\n  try: captaincode .", err)
+	}
 
 	if *showVersion {
 		printVersion(os.Stdout)
 		return nil
 	}
-	if *workspace == "" {
-		flag.Usage()
-		return errors.New("provide --workspace with a project you intend to expose")
+
+	// The workspace is positional by preference so the common case is one token.
+	// It is never inferred: this process executes tools against this directory,
+	// so an unstated default would expose whatever the user happened to be in.
+	positional := flags.Args()
+	if *workspace == "" && len(positional) > 0 {
+		*workspace = positional[0]
+		positional = positional[1:]
 	}
+	switch {
+	case *workspace == "":
+		return errors.New("no project directory given\n  try: captaincode .")
+	case len(positional) > 0:
+		return fmt.Errorf("unexpected argument %q\n  try: captaincode %s", positional[0], *workspace)
+	}
+
 	root, err := filepath.Abs(*workspace)
 	if err != nil {
 		return err
@@ -96,18 +126,16 @@ func run() error {
 		return err
 	}
 	if *databasePath == "" {
-		directory, err := os.UserConfigDir()
-		if err != nil {
+		if *databasePath, err = defaultDatabasePath(root); err != nil {
 			return err
 		}
-		*databasePath = filepath.Join(directory, "captaincode", "sessions.db")
 	}
 	dbPath, err := filepath.Abs(*databasePath)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
-		return err
+		return errPermission(filepath.Dir(dbPath), err)
 	}
 	canonicalParent, err := filepath.EvalSymlinks(filepath.Dir(dbPath))
 	if err != nil {
@@ -122,7 +150,7 @@ func run() error {
 	}
 	database, err := storage.Open(dbPath)
 	if err != nil {
-		return err
+		return errPermission(dbPath, err)
 	}
 	defer database.Close()
 	if err := database.Bind(context.Background(), root); err != nil {
@@ -186,7 +214,14 @@ func run() error {
 		}
 		return fmt.Sprintf("%s\nRun: %s", state.Messages[len(state.Messages)-1].Content, state.ID), nil
 	}
-	if *tui {
+	if *ide {
+		// Bubble Tea needs a terminal on both ends. Without the check it fails
+		// deep inside its own setup with a message that neither names the
+		// cause nor the way out, which is a poor way to learn that a script or
+		// a CI step now needs --ide=false.
+		if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+			return errors.New("the interface needs a terminal on stdin and stdout\n  this looks like a pipe, a script, or CI\n  for one-shot output: captaincode --ide=false .")
+		}
 		// The interface reports the resolved provider, model, and grants so it
 		// never has to infer them. Passing them keeps that dependency explicit.
 		return ui.Run(runOne, ui.Info{

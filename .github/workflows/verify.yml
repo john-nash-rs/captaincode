@@ -25,4 +25,6 @@ jobs:
           CAPTAINCODE_SANDBOX_TEST: '1'
       - run: go build -o bin/captaincode ./cmd/captaincode
       - name: Offline CLI smoke
-        run: ./bin/captaincode --workspace ./testdata/project --db "$RUNNER_TEMP/captaincode-smoke.db"
+        # --ide=false because the interface is now the default and needs a
+        # terminal, which a runner does not provide.
+        run: ./bin/captaincode ./testdata/project --ide=false --db "$RUNNER_TEMP/captaincode-smoke.db"

@@ -30,28 +30,38 @@ func stderr() io.Writer { return os.Stderr }
 
 // usage prints the top-level help. The standard flag package is used
 // deliberately; a hand-rolled parser would add a dependency for no gain.
-func usage() {
+func usage(flags *flag.FlagSet) {
 	out := stderr()
 	fmt.Fprint(out, `captaincode - a single-user coding-agent harness
 
 Usage:
-  captaincode --workspace DIR [flags]     run one request
-  captaincode --tui --workspace DIR       open the terminal interface
-  captaincode doctor                     check runtime prerequisites
-  captaincode version                    print version information
+  captaincode [DIR] [flags]        open the interface on DIR (default)
+  captaincode [DIR] --ide=false   run one request and print the answer
+  captaincode doctor              check runtime prerequisites
+  captaincode version             print version information
+
+The project directory is the first argument. It is never inferred, because
+tools execute against it.
 
 Flags:
 `)
-	flag.PrintDefaults()
+	flags.PrintDefaults()
 	fmt.Fprint(out, `
 Examples:
-  captaincode --workspace ./myproject --db ~/.local/share/captaincode/p.db
-  captaincode --tui --workspace ./myproject --db ~/.local/share/captaincode/p.db
-  captaincode --provider openrouter --workspace ./p --db /tmp/p.db
+  captaincode .                              interface on the current project
+  captaincode ~/src/myproject                interface on another project
+  captaincode . --ide=false                  one-shot answer
+  captaincode . --provider openrouter         with a hosted model
+  captaincode . --db ~/.local/share/cc.db    choose the database explicitly
 
-The database must be outside the workspace. Start with "captaincode doctor"
-if tools fail to run; CaptainCode refuses to execute tools without its
-sandbox rather than falling back to running them unsandboxed.
+--tui was removed. The interface is now the default; use --ide=false for
+the previous one-shot behaviour.
+
+The database defaults to one file per workspace under the user config
+directory, so separate projects do not collide. It must stay outside the
+workspace. Start with "captaincode doctor" if tools fail to run;
+CaptainCode refuses to execute tools without its sandbox rather than
+falling back to running them unsandboxed.
 
 Environment:
   OPENROUTER_API_KEY   credential override; takes precedence over the stored key

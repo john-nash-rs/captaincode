@@ -10,7 +10,7 @@ an action.** Every guarantee CaptainCode makes — bounded execution, recorded
 observations, recoverable runs, visible permissions — follows from keeping that
 distinction explicit.
 
-> **Status: 0.1.0.** A single-operator tool, not a hosted service. It is
+> **Status: 0.2.0 (unreleased on `main`).** A single-operator tool, not a hosted service. It is
 > designed to be read, run, and audited. It is not hardened for
 > multi-tenancy or adversarial use. See [Limitations](#limitations).
 
@@ -248,10 +248,22 @@ deprecated and host or MDM policy may remove it.
 **`database must be outside the tool workspace`.** The `--db` path resolved
 inside the directory being exposed to tools. Pick another location.
 
+**`--tui was removed`.** The interface is the default. Use `captaincode .`, or
+add `--ide=false` for one-shot output.
+
+**`the interface needs a terminal on stdin and stdout`.** You are running
+without an interactive terminal — a pipe, a script, or CI. Add `--ide=false`.
+
+**`no project directory given`.** Pass the project as the first argument:
+`captaincode .`
+
 ## Quick start
 
+The project directory is the **first argument**. It is never inferred, because
+tools execute against it.
+
 ```sh
-captaincode --workspace ./testdata/project --db /tmp/captaincode-demo.db
+captaincode ./myproject --ide=false
 ```
 
 ```
@@ -259,13 +271,36 @@ The project version is 2.5.0 (package.json).
 Run: 526e845c47c9161ecafe395fe6776714
 ```
 
-The database must live **outside** the workspace. Each database is bound to one
-canonical project path and refuses another; use a fresh `--db` per project.
+Omit `--ide=false` to get the interactive interface instead:
+
+```sh
+captaincode ./myproject
+```
+
+Flags may appear before or after the directory. `--tui` was removed in 0.2.0;
+the interface is the default and `--ide=false` selects the previous one-shot
+behaviour.
+
+### Database location
+
+Each workspace gets its own database under the user config directory, named
+`<directory>-<hash>.db`. Two projects therefore never collide, and the same
+project always maps to the same file so `--resume` works without repeating
+`--db`.
+
+Override it when you want the database somewhere specific:
+
+```sh
+captaincode ./myproject --db ~/.local/share/captaincode/myproject.db
+```
+
+The database must stay **outside** the workspace, since the workspace is what
+tools are allowed to see.
 
 ### The terminal interface
 
 ```sh
-./bin/captaincode --tui --workspace ./testdata/project --db /tmp/captaincode.db
+./bin/captaincode ./testdata/project
 ```
 
 Type a question and press Enter. Type while a run is active and it queues.
@@ -298,8 +333,8 @@ Credentials resolve per request, so rotating a key or changing a model takes
 effect immediately.
 
 ```sh
-./bin/captaincode --provider openrouter \
-  --workspace ./testdata/project \
+captaincode ./testdata/project \
+  --provider openrouter \
   --db /tmp/captaincode-live.db \
   --config ~/.captaincode.json
 ```
@@ -352,7 +387,7 @@ summarization or retrieval layer.
 ## Recovery semantics
 
 ```sh
-./bin/captaincode --workspace ./testdata/project --db /tmp/captaincode.db --resume RUN_ID
+./bin/captaincode ./testdata/project --ide=false --resume RUN_ID
 ```
 
 | Phase on restart | Behavior |

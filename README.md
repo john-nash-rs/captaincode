@@ -519,17 +519,22 @@ your project when experimenting.
 
 ### Platform support
 
-| | Builds | Talks to a model | Runs tools |
+| | Released | Talks to a model | Runs tools |
 |---|---|---|---|
 | macOS | yes | yes | yes, via `sandbox-exec` |
 | Linux | yes | yes | yes, via `bubblewrap` |
-| Windows | yes | yes | **no** |
+| Windows | **no** | — | — |
 
-The Windows binary builds and the conversation, provider, database and file
-reading all work. **Tools do not**, because there is no isolation backend for
-Windows yet, and CaptainCode refuses to run tools unsandboxed rather than
-running them unsandboxed and calling it a feature. `doctor` reports this as a
-failure.
+**No Windows build is published.** The source compiles for Windows and the
+conversation, provider and database layers all work there, but there is no
+isolation backend, and CaptainCode refuses to run tools unsandboxed rather than
+running them unsandboxed and calling it a feature. Publishing a binary where
+the central capability is missing would be worse than publishing none.
+
+What is already done for Windows, so that adding a backend is not a port from
+scratch: the database lock uses `LockFileEx` rather than `flock`, process
+setup is split from the POSIX-only `Setpgid` path, and `doctor` reports the
+missing backend as a failure rather than a warning.
 
 Two gaps are documented in the source rather than left to be discovered:
 process cancellation on Windows kills the immediate child rather than the whole

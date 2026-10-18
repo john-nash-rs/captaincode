@@ -15,30 +15,75 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/john-nash-rs/captaincode/core"
 	"github.com/john-nash-rs/captaincode/toolbox"
 )
 
+// Grants supplies the current permission set.
+//
+// It is consulted per request rather than captured at construction, for the
+// same reason the credential is: a grant given from the interface must take
+// effect without a restart. Freezing them in the Registry meant a user who
+// turned writes on still saw the model refuse to edit anything until they quit
+// and started again.
+type Grants func() (writes, commands bool)
+
 type Worker struct {
 	Registry                  toolbox.Registry
 	Executable, SandboxBinary string
+	// Grants, when set, overrides the Registry's flags on every call.
+	Grants Grants
 }
 
-func (w Worker) Definitions() []core.Definition { return w.Registry.Definitions() }
+// grants resolves the current permission set.
+func (w Worker) grants() (writes, commands bool) {
+	if w.Grants != nil {
+		return w.Grants()
+	}
+	return w.Registry.AllowWrites, w.Registry.AllowCommands
+}
+
+// registry returns the registry with the current grants applied.
+func (w Worker) registry() toolbox.Registry {
+	writes, commands := w.grants()
+	registry := w.Registry
+	registry.AllowWrites, registry.AllowCommands = writes, commands
+	return registry
+}
+
+func (w Worker) Definitions() []core.Definition { return w.registry().Definitions() }
 func (w Worker) ReplaySafe(name string) bool    { return w.Registry.ReplaySafe(name) }
 
+// mutating names every tool that changes the workspace. The policy check runs
+// here as well as in the registry, so a grant cannot be bypassed by reaching
+// the worker directly.
+func mutating(name string) bool {
+	switch name {
+	case "write_file", "append_file", "create_file", "make_directory", "move_path", "delete_path":
+		return true
+	}
+	return false
+}
+
 func (w Worker) Execute(ctx context.Context, call core.Call) core.Result {
-	if (call.Name == "write_file" && !w.Registry.AllowWrites) || (call.Name == "run_command" && !w.Registry.AllowCommands) {
-		return core.Failure("denied", "tool disabled by current policy")
+	registry := w.registry()
+	if (mutating(call.Name) && !registry.AllowWrites) || (call.Name == "run_command" && !registry.AllowCommands) {
+		// The worker refuses a mutating call before doing anything, so the
+		// reason has to carry the remedy too, not merely the fact.
+		grant := "/permissions writes on"
+		if call.Name == "run_command" {
+			grant = "/permissions commands on"
+		}
+		return core.Failure("denied", "CaptainCode is read-only, so "+call.Name+
+			" is unavailable. Tell the user to run: "+grant+
+			" — it applies immediately, with no restart.")
 	}
 	command, err := w.Command(ctx, []string{"worker"})
 	if err != nil {
 		return core.Failure("sandbox_unavailable", err.Error())
 	}
-	registry := w.Registry
 	if runtime.GOOS == "linux" {
 		registry.Root = "/workspace"
 	}
@@ -106,6 +151,15 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 		return nil, errors.New("workspace cannot be the filesystem root")
 	}
 	var command *exec.Cmd
+	// Resolved once, here, and used by both backends.
+	//
+	// Reading the Registry's startup fields instead meant a grant given from
+	// the interface changed the advertised tool list and the policy check, but
+	// not the isolation profile: the model saw create_file, called it, passed
+	// the check, and was then refused by sandbox-exec. To an operator that
+	// reads as "the system did not allow it", which is exactly the report.
+	registry := w.registry()
+
 	switch runtime.GOOS {
 	case "darwin":
 		binary := w.SandboxBinary
@@ -115,7 +169,12 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 		if _, err := exec.LookPath(binary); err != nil {
 			return nil, errors.New("sandbox-exec unavailable")
 		}
-		profile := DarwinProfile(root, executable, w.Registry.AllowWrites)
+		// The live grant, not the registry's startup value. Reading the frozen
+		// field here meant a grant given from the interface still launched a
+		// read-only profile: the tool was advertised, the call passed the
+		// policy check, and sandbox-exec then refused the write, which reads
+		// to the operator as "the system did not allow it".
+		profile := DarwinProfile(root, executable, registry.AllowWrites)
 		args := append([]string{"-p", profile, executable}, workerArgs...)
 		command = exec.CommandContext(ctx, binary, args...)
 	case "linux":
@@ -133,7 +192,7 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 			}
 		}
 		mode := "--ro-bind"
-		if w.Registry.AllowWrites {
+		if registry.AllowWrites {
 			mode = "--bind"
 		}
 		args = append(args, mode, root, "/workspace")
@@ -157,17 +216,7 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 	}
 	command.Dir = root
 	command.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "HOME=/nonexistent"}
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	command.Cancel = func() error {
-		if command.Process == nil {
-			return os.ErrProcessDone
-		}
-		err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-		if err == syscall.ESRCH {
-			return os.ErrProcessDone
-		}
-		return err
-	}
+	isolate(command)
 	command.WaitDelay = 2 * time.Second
 	return command, nil
 }

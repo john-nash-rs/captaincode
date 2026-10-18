@@ -86,6 +86,7 @@ var valueFlags = map[string]bool{
 	"workspace": true,
 	"db":        true,
 	"config":    true,
+	"model":     true,
 	"provider":  true,
 	"question":  true,
 	"resume":    true,

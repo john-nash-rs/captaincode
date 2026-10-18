@@ -36,6 +36,15 @@ var version = "dev"
 // commit is set the same way and identifies the exact source revision.
 var commit = "unknown"
 
+// newRunID returns an identifier for a run.
+func newRunID() string {
+	identifier := make([]byte, 16)
+	if _, err := rand.Read(identifier); err != nil {
+		return "run"
+	}
+	return hex.EncodeToString(identifier)
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "captaincode:", err)
@@ -79,6 +88,7 @@ func run() error {
 	workspace := flags.String("workspace", "", "project directory (may also be given as the first argument)")
 	databasePath := flags.String("db", "", "SQLite path outside the project (default: per workspace)")
 	configPath := flags.String("config", "", "explicit user configuration JSON")
+	model := flags.String("model", "", "provider model identifier (overrides the configuration for one run)")
 	providerName := flags.String("provider", "fixture", "fixture or openrouter")
 	question := flags.String("question", "What is the project version?", "user request")
 	resume := flags.String("resume", "", "resume an interrupted run by ID")
@@ -122,10 +132,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(*configPath)
+
+	cfg, configFile, err := config.Resolve(*configPath)
 	if err != nil {
 		return err
 	}
+	// A flag beats the file for one run, which is what makes a single live
+	// query possible without editing anything.
+	if *model != "" {
+		cfg.Model = *model
+	}
+
 	if *databasePath == "" {
 		if *databasePath, err = defaultDatabasePath(root); err != nil {
 			return err
@@ -163,18 +180,21 @@ func run() error {
 	}
 	// Built before the provider so the model can be read per request, which is
 	// what lets /openrouter model apply without a restart.
-	settings, err := newSettings(*configPath, *providerName, cfg.Model)
+	settings, err := newSettings(configFile, *providerName, cfg.Model, cfg.AllowWrites, cfg.AllowCommands)
 	if err != nil {
 		return err
 	}
 	var languageModel core.Model = core.Fixture{}
+	// probe and browser back /connect, /status, and model selection. Both are
+	// nil for the fixture provider, which needs neither a key nor a check.
+	var connectivity ui.Probe
+	var catalogue ui.Browser
 	switch *providerName {
 	case "fixture":
 		fmt.Fprintln(os.Stderr, "Deterministic fixture: supports the package.json version task only.")
 	case "openrouter":
-		// A missing credential is not fatal here. The interface can store one
-		// with /openrouter api-key, so refusing to start would leave no way to
-		// supply it. The provider reports the failure when a request needs it.
+		// A missing credential is not fatal here. /connect supplies one, so
+		// refusing to start would leave no way to give it.
 		if _, err := keyring.Resolve(); err != nil {
 			return err
 		}
@@ -186,26 +206,39 @@ func run() error {
 		adapter.Stream = *stream
 		adapter.ModelFunc = settings.Model
 		languageModel = adapter
+		connectivity = &openrouterProbe{adapter: adapter}
+		catalogue = &openrouterBrowser{adapter: adapter}
 	default:
 		return errors.New("unknown provider")
 	}
-	worker := sandbox.Worker{Executable: executable, SandboxBinary: cfg.SandboxBinary, Registry: toolbox.Registry{Root: root, MaxBytes: cfg.OutputBytes, AllowWrites: cfg.AllowWrites, AllowCommands: cfg.AllowCommands}}
+	worker := sandbox.Worker{
+		Executable:    executable,
+		SandboxBinary: cfg.SandboxBinary,
+		Registry:      toolbox.Registry{Root: root, MaxBytes: cfg.OutputBytes, AllowWrites: cfg.AllowWrites, AllowCommands: cfg.AllowCommands},
+		// Consulted per tool call so /permissions takes effect without a
+		// restart, matching how the credential and model already behave.
+		Grants: settings.Grants,
+	}
+	// The conversation so far. Prompts continue it rather than each starting
+	// alone, so a follow-up like "save it in a file" has the earlier exchange
+	// to refer to.
+	conversation := &session{
+		resume: *resume,
+		onNew: func(err error) {
+			fmt.Fprintf(os.Stderr, "starting a new conversation: %v\n", err)
+		},
+	}
 	runOne := func(parent context.Context, prompt string, emit func(core.Event)) (string, error) {
 		ctx, cancel := context.WithTimeout(parent, time.Duration(cfg.RunTimeoutSeconds)*time.Second)
 		defer cancel()
 		engine := core.Engine{Model: languageModel, Tools: worker, Store: database, MaxTurns: cfg.MaxTurns, MaxToolCalls: cfg.MaxToolCalls, MaxContextBytes: cfg.ContextBytes, ToolTimeout: time.Duration(cfg.ToolTimeoutSeconds) * time.Second, Emit: emit}
-		identifier := make([]byte, 16)
-		if _, err := rand.Read(identifier); err != nil {
+
+		state, err := conversation.next(prompt, database.Load)
+		if err != nil {
 			return "", err
 		}
-		state := core.NewRun(hex.EncodeToString(identifier), prompt)
-		if *resume != "" {
-			loaded, loadErr := database.Load(ctx, *resume)
-			if loadErr != nil {
-				return "", loadErr
-			}
-			state = loaded
-			*resume = ""
+		resumed := *resume != ""
+		if resumed {
 			if err := engine.Recover(&state); err != nil {
 				return "", err
 			}
@@ -213,8 +246,10 @@ func run() error {
 		if err := engine.Run(ctx, &state); err != nil {
 			return "", fmt.Errorf("run %s: %w", state.ID, err)
 		}
+		conversation.record(state)
 		return fmt.Sprintf("%s\nRun: %s", state.Messages[len(state.Messages)-1].Content, state.ID), nil
 	}
+	*resume = conversation.resume
 	if *ide {
 		// Bubble Tea needs a terminal on both ends. Without the check it fails
 		// deep inside its own setup with a message that neither names the
@@ -232,6 +267,11 @@ func run() error {
 			AllowWrites:   cfg.AllowWrites,
 			AllowCommands: cfg.AllowCommands,
 			Settings:      settings,
+			Probe:         connectivity,
+			Browser:       catalogue,
+			// Offered as examples while setting a model. Anyone can read a
+			// model identifier off a web page; nobody remembers one.
+			Models: suggestedModels,
 		})
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -240,6 +280,14 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "run=%s event=%s call=%s tool=%s duration_ms=%d\n", event.RunID, event.Kind, event.CallID, event.Tool, event.Duration.Milliseconds())
 	})
 	if err != nil {
+		// Print the remedy underneath the cause. In one-shot mode there is no
+		// interface to suggest a next step, so this error is all the operator
+		// gets; a bare "request failed" sent them looking for diagnostics that
+		// did not exist.
+		if advice := ui.SuggestedFor(err); advice != "" {
+			fmt.Fprintln(os.Stderr, "  "+advice)
+			fmt.Fprintln(os.Stderr, "  choose another model: captaincode /models   (or --model <id>)")
+		}
 		return err
 	}
 	fmt.Println(answer)

@@ -284,10 +284,6 @@ Flags may appear before or after the directory. `--tui` was removed in 0.2.0;
 the interface is the default and `--ide=false` selects the previous one-shot
 behaviour.
 
-Flags may appear before or after the directory. `--tui` was removed in 0.2.0;
-the interface is the default and `--ide=false` selects the previous one-shot
-behaviour.
-
 ### Database location
 
 Each workspace gets its own database under the user config directory, named
@@ -325,30 +321,112 @@ suggestion.
 
 | Command | Effect |
 |---|---|
+| `/connect` | Set up a key and a model, then verify the connection |
+| `/status` | Show what is configured and check that it works |
+| `/models` | Pick a model from a list of the ones your account can use |
+| `/permissions` | Show or change what may be edited or run |
 | `/openrouter` | Report provider, model, credential, and keyfile path |
-| `/openrouter api-key` | Store a provider credential, with typed characters hidden |
-| `/openrouter model <id>` | Store a model identifier |
+| `/openrouter api-key` | Store a credential — paste or type; nothing is echoed |
+| `/openrouter model` | Open the model picker |
+| `/openrouter model <id>` | Set a model by identifier |
 | `/openrouter clear-key` | Remove the stored credential |
 | `/openrouter path` | Print the keyfile path |
 
-### Connecting a provider
+Type `/` and the list appears. **↑** and **↓** — or a click — move the highlight,
+**enter** runs it, **tab** completes. Copy and paste work throughout.
 
-A missing credential is **not** a startup error. Start the interface, run
-`/openrouter api-key`, paste the key, and the next request uses it — no restart.
+### Talking to it
+
+Prompts continue a conversation. Asking for a Flask app and then saying "save
+it in a file" works, because the second prompt carries the first exchange with
+it.
+
+```
+› give me hello world api in flask
+  ```python
+  from flask import Flask …
+  ```
+
+› save it in a file
+  Written to app.py, 12 lines.
+```
+
+Each prompt is still its own **run** with its own turn and tool-call budget,
+which is what `--resume` refers to. A run that failed or ran out of budget is
+not continued, because it may have applied some of its tool calls; the
+conversation restarts and says so.
+
+### Giving it permission to edit your project
+
+Read-only is the default. The model will tell you it cannot save a file, and
+you can grant that from inside the interface:
+
+```text
+/permissions               show what is allowed
+/permissions writes on     allow editing files here
+/permissions commands on   allow running programs here
+/permissions all off       back to read-only
+```
+
+Grants apply immediately, with no restart. They are project-wide and coarse:
+there is no per-call approval prompt, so use a disposable copy when
+experimenting. Tools stay inside the OS sandbox and inside the project
+directory regardless.
+
+Run `/connect`. It asks for whatever is missing and finishes by checking that the
+model actually answers:
+
+1. **API key.** Paste it or type it. The field shows `paste your API key` when
+   empty and a growing mask once there is something there, so an empty field
+   never looks filled. Saving prints a confirmation and the file it went to.
+2. **Model.** A list of the models your account can use, free ones first, each
+   with its price. Type to filter, **↑**/**↓** or a click to choose, **enter** to
+   use it. There is nothing to memorise or copy off a web page.
+3. **Check.** One request that verifies the key is accepted and the model
+   exists. It costs nothing and says which of the two failed if either did.
+
+Both settings are written to `~/.captaincode.json`, so the next run is already
+connected. A missing credential is **not** a startup error, so you can always get
+into the interface to run this.
+
+`/status` re-checks later without changing anything. The footer shows
+`connected`, `unverified`, or `not connected` — a model named in your settings
+is not the same thing as one that answers.
+
+**When a request fails**, the cause is named and the remedy printed underneath:
+
+```
+Error: thinkingmachines/inkling:free is only available on agentic harnesses.
+  This free model is restricted to approved coding apps. Pick a paid one with /models.
+  run /models to pick a different model
+```
+
+**On the free tier.** OpenRouter gates `:free` models to registered agentic
+harnesses, and CaptainCode is not on that list. Roughly half the free models
+answer `403`; the rest are rate limited per account per day. The picker shows
+each model's price and keeps the provider's coding ranking, so nothing is
+promoted ahead of what actually works.
+
+### Reading back
+
+**↑** and **↓** scroll the transcript, **PgUp**/**PgDn** move a screenful,
+**Home**/**End** jump to the ends, and the mouse wheel works. New output returns
+the view to the live end. While scrolled back the status line says so, because
+a spinner describing a run that has left the screen is worse than none.
+
+The arrows belong to the command menu and the model picker while those are
+open, so a model can still be chosen.
 
 Credentials resolve per request, so rotating a key or changing a model takes
 effect immediately.
 
 ```sh
-captaincode ./testdata/project \
-  --provider openrouter \
-  --db /tmp/captaincode-live.db \
-  --config ~/.captaincode.json
+captaincode ./testdata/project --provider openrouter --model openrouter/free
 ```
 
-```json
-{ "model": "openrouter/free", "allow_writes": false, "allow_commands": false }
-```
+`--model` applies to that one run. To make it stick, either run `/connect` or
+`/openrouter model <id>` in the interface, which writes it to the settings file
+described under [Configuration](#configuration).
 
 `OPENROUTER_API_KEY` overrides the stored file for a single shell session.
 
@@ -367,9 +445,35 @@ charges**, and selected project content leaves your machine.
 
 ## Configuration
 
-Only an explicit `--config` file overrides defaults; no project config is
-auto-loaded. Unknown fields, out-of-range values, and trailing JSON are
-rejected rather than ignored.
+There is one settings file: `~/.captaincode.json`.
+
+```sh
+captaincode /connect
+```
+
+writes it for you. Most people never need to open it. Use `--config <path>` to
+read a different file for one run — that is how you keep per-project settings:
+
+```sh
+captaincode --config ./deploy.json .
+```
+
+Not having the file is not an error. A `--config` path that does not exist *is*
+an error, because asking for one specific file and silently getting defaults
+would hide a typo. A file that exists but does not parse is always an error.
+
+`doctor` prints which file is in force, and whether it names a model:
+
+```sh
+captaincode doctor --provider openrouter
+```
+
+```text
+  ✓  config   /Users/you/.captaincode.json  model openrouter/free
+```
+
+A `--model` on the command line overrides the file for one run and is not
+written back to it.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -383,9 +487,54 @@ rejected rather than ignored.
 | `allow_writes` | `false` | Coarse grant for the exposed project |
 | `allow_commands` | `false` | Coarse grant for the exposed project |
 
+Unknown fields, out-of-range values, and trailing JSON are rejected rather than
+ignored. Fields you leave out keep their defaults.
+
+### Tools
+
+Everything is implemented in Go against `os.Root` and `path/filepath`, so
+behaviour follows the target filesystem rather than one platform's
+conventions. No interpreter is required at runtime.
+
+| Tool | Needs | Effect |
+|---|---|---|
+| `read_file` | — | Read a bounded text file |
+| `list_files` | — | List one directory |
+| `search_files` | — | Find a literal string |
+| `stat_file` | — | Report existence and kind |
+| `create_file` | writes | Create an empty file; refuses to overwrite |
+| `write_file` | writes | Create or replace, with a hash check |
+| `append_file` | writes | Append, creating if absent |
+| `make_directory` | writes | Create a directory and parents |
+| `move_path` | writes | Rename or move |
+| `delete_path` | writes | Delete a file or an *empty* directory |
+
+A non-empty directory is refused rather than emptied. Removing the workspace
+root is refused outright. Every path is checked against the workspace before
+any syscall, so `..` and absolute paths cannot escape.
+
 Enabling writes or commands is a **coarse project-wide grant, not a per-call
 approval.** There is no interactive approval prompt. Use a disposable copy of
 your project when experimenting.
+
+### Platform support
+
+| | Builds | Talks to a model | Runs tools |
+|---|---|---|---|
+| macOS | yes | yes | yes, via `sandbox-exec` |
+| Linux | yes | yes | yes, via `bubblewrap` |
+| Windows | yes | yes | **no** |
+
+The Windows binary builds and the conversation, provider, database and file
+reading all work. **Tools do not**, because there is no isolation backend for
+Windows yet, and CaptainCode refuses to run tools unsandboxed rather than
+running them unsandboxed and calling it a feature. `doctor` reports this as a
+failure.
+
+Two gaps are documented in the source rather than left to be discovered:
+process cancellation on Windows kills the immediate child rather than the whole
+tree, because Windows has no equivalent of `kill(-pgid)` and job objects are
+not yet wired up.
 
 The context bound is measured in serialized bytes, not provider tokens. Old
 assistant and tool groups may be dropped, which loses evidence; there is no

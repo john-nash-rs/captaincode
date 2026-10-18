@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -26,19 +27,69 @@ type Registry struct {
 	AllowWrites, AllowCommands bool
 }
 
+// Definitions lists every tool the harness exposes.
+//
+// The file operations are written in Go against os.Root and path/filepath, so
+// they behave the same on Linux, macOS and Windows: separators, case
+// sensitivity and rename semantics are whatever the target filesystem does,
+// rather than something this code assumes. That is why they are not shell
+// scripts or a Python helper, which would tie the tool surface to an
+// interpreter the user may not have installed and to one platform's
+// conventions.
+//
+// Write-capable tools appear only when the matching grant is on. A model that
+// cannot see a tool says it has none, which is honest and, before
+// /permissions existed, left the operator with nothing to do about it.
 func (r Registry) Definitions() []core.Definition {
 	definitions := []core.Definition{
 		{Name: "read_file", Description: "Read a UTF-8 text file relative to the workspace. Output is bounded.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`)},
 		{Name: "list_files", Description: "List one workspace directory, excluding hidden entries.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`)},
 		{Name: "search_files", Description: "Search a literal string in bounded workspace files. Returns matching paths.", Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`)},
+		{Name: "stat_file", Description: "Report whether a workspace path exists and whether it is a file, directory, or other.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`)},
 	}
 	if r.AllowWrites {
-		definitions = append(definitions, core.Definition{Name: "write_file", Description: "Replace a bounded text file only when its SHA-256 equals expected_sha256; use absent to create.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"expected_sha256":{"type":"string"}},"required":["path","content","expected_sha256"],"additionalProperties":false}`)})
+		definitions = append(definitions,
+			core.Definition{Name: "write_file", Description: "Create or replace a bounded text file. Pass expected_sha256 'absent' to create, or the previous sha256:… to replace an existing file.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"expected_sha256":{"type":"string"}},"required":["path","content","expected_sha256"],"additionalProperties":false}`)},
+			core.Definition{Name: "append_file", Description: "Append bounded text to a file, creating it if absent.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`)},
+			core.Definition{Name: "create_file", Description: "Create an empty file. Fails if it already exists.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`)},
+			core.Definition{Name: "make_directory", Description: "Create a directory and any missing parents. Succeeds if it already exists.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`)},
+			core.Definition{Name: "move_path", Description: "Rename or move a file or directory inside the workspace.", Parameters: json.RawMessage(`{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"}},"required":["from","to"],"additionalProperties":false}`)},
+			core.Definition{Name: "delete_path", Description: "Delete a file or an empty directory.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`)},
+		)
 	}
 	if r.AllowCommands {
 		definitions = append(definitions, core.Definition{Name: "run_command", Description: "Run an absolute executable and argument array inside the OS sandbox. No implicit shell. Output is bounded.", Parameters: json.RawMessage(`{"type":"object","properties":{"program":{"type":"string"},"args":{"type":"array","items":{"type":"string"}}},"required":["program","args"],"additionalProperties":false}`)})
 	}
 	return definitions
+}
+
+// needsWrite reports whether a tool changes the workspace.
+func needsWrite(name string) bool {
+	switch name {
+	case "write_file", "append_file", "create_file", "make_directory", "move_path", "delete_path":
+		return true
+	}
+	return false
+}
+
+// deniedReason explains a refusal in terms the model can pass on.
+//
+// It used to say only "tool is disabled by current policy", which left the
+// model able to tell the user it could not edit anything and nothing more.
+// Since the refusal is a deliberate grant rather than a limit, the remedy is
+// short and belongs in the message: the model can then tell the user exactly
+// what to run, which is the difference between a dead end and a keystroke.
+func deniedReason(name string, writes, commands bool) string {
+	grant := "/permissions writes on"
+	if name == "run_command" {
+		grant = "/permissions commands on"
+	}
+	if needsWrite(name) && !writes {
+		return "CaptainCode is read-only, so " + name + " is unavailable. " +
+			"Tell the user to run: " + grant + " — it applies immediately, with no restart."
+	}
+	return "Running programs is disabled. Tell the user to run: " + grant +
+		" — it applies immediately, with no restart."
 }
 
 func (r Registry) ReplaySafe(name string) bool {
@@ -82,8 +133,8 @@ func (r Registry) Execute(ctx context.Context, call core.Call) core.Result {
 	if r.MaxBytes < 128 || r.MaxBytes > 32768 {
 		return core.Failure("configuration", "invalid output limit")
 	}
-	if (call.Name == "write_file" && !r.AllowWrites) || (call.Name == "run_command" && !r.AllowCommands) {
-		return core.Failure("denied", "tool is disabled by current policy")
+	if needsWrite(call.Name) && !r.AllowWrites || call.Name == "run_command" && !r.AllowCommands {
+		return core.Failure("denied", deniedReason(call.Name, r.AllowWrites, r.AllowCommands))
 	}
 	if call.Name == "run_command" {
 		return r.command(ctx, call)
@@ -220,6 +271,145 @@ func (r Registry) Execute(ctx context.Context, call core.Call) core.Result {
 		}
 		hash := sha256.Sum256([]byte(*args.Content))
 		return core.Result{OK: true, Text: "sha256:" + hex.EncodeToString(hash[:])}
+	case "stat_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		if Decode(call.Arguments, &args) != nil || !safePath(args.Path) {
+			return core.Failure("invalid_arguments", "invalid path")
+		}
+		info, err := root.Stat(args.Path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return core.Result{Text: "absent"}
+		}
+		if err != nil {
+			return fileError(err)
+		}
+		kind := "other"
+		switch {
+		case info.IsDir():
+			kind = "directory"
+		case info.Mode().IsRegular():
+			kind = "file"
+		}
+		if info.IsDir() {
+			return core.Result{Text: "directory"}
+		}
+		return core.Result{Text: "file " + strconv.FormatInt(info.Size(), 10) + " bytes (" + kind + ")"}
+
+	case "append_file":
+		var args struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		if Decode(call.Arguments, &args) != nil || !safePath(args.Path) || args.Path == "." || len(args.Content) > r.MaxBytes {
+			return core.Failure("invalid_arguments", "invalid append request")
+		}
+		existing, _, err := read(root, args.Path, r.MaxBytes)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fileError(err)
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			existing = nil
+		}
+		if len(existing)+len(args.Content) > r.MaxBytes {
+			return core.Failure("conflict", "the file would exceed the "+strconv.Itoa(r.MaxBytes)+" byte edit limit")
+		}
+		file, err := root.OpenFile(args.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			return fileError(err)
+		}
+		_, writeErr := io.WriteString(file, args.Content)
+		syncErr := file.Sync()
+		closeErr := file.Close()
+		if errors.Join(writeErr, syncErr, closeErr) != nil {
+			return core.Failure("write_failed", "append could not be saved")
+		}
+		return core.Result{OK: true, Text: "appended " + strconv.Itoa(len(args.Content)) + " bytes to " + args.Path}
+
+	case "create_file":
+		var args struct {
+			Path string `json:"path"`
+		}
+		if Decode(call.Arguments, &args) != nil || !safePath(args.Path) || args.Path == "." {
+			return core.Failure("invalid_arguments", "invalid path")
+		}
+		file, err := root.OpenFile(args.Path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if errors.Is(err, fs.ErrExist) {
+			return core.Failure("conflict", "a file already exists at that path")
+		}
+		if err != nil {
+			return fileError(err)
+		}
+		if err := file.Close(); err != nil {
+			return core.Failure("write_failed", "file could not be closed")
+		}
+		return core.Result{OK: true, Text: "created " + args.Path}
+
+	case "make_directory":
+		var args struct {
+			Path string `json:"path"`
+		}
+		// The workspace root already exists and "." would name it, so both are
+		// refused rather than treated as a no-op: silently succeeding on the
+		// root hides a mistaken path.
+		if Decode(call.Arguments, &args) != nil || !safePath(args.Path) || args.Path == "." {
+			return core.Failure("invalid_arguments", "invalid directory path")
+		}
+		if err := root.MkdirAll(args.Path, 0o755); err != nil {
+			return fileError(err)
+		}
+		return core.Result{OK: true, Text: "directory ready: " + args.Path}
+
+	case "move_path":
+		var args struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}
+		if Decode(call.Arguments, &args) != nil || !safePath(args.From) || !safePath(args.To) || args.From == "." || args.To == "." {
+			return core.Failure("invalid_arguments", "invalid move request")
+		}
+		if err := root.Rename(args.From, args.To); err != nil {
+			return fileError(err)
+		}
+		return core.Result{OK: true, Text: "moved " + args.From + " to " + args.To}
+
+	case "delete_path":
+		var args struct {
+			Path string `json:"path"`
+		}
+		// Removing the workspace root is refused outright. It is outside the
+		// tool's remit and there is no observation that could recover from it.
+		if Decode(call.Arguments, &args) != nil || !safePath(args.Path) || args.Path == "." {
+			return core.Failure("invalid_arguments", "invalid path")
+		}
+		info, err := root.Stat(args.Path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return core.Failure("conflict", "nothing exists at that path")
+		}
+		if err != nil {
+			return fileError(err)
+		}
+		// A non-empty directory is refused rather than emptied. Recursively
+		// deleting whatever happens to be inside a directory is a much larger
+		// action than the call asked for, and one that no observation here
+		// would make obvious.
+		if info.IsDir() {
+			entries, err := root.Open(args.Path)
+			if err != nil {
+				return fileError(err)
+			}
+			more, _ := entries.Readdirnames(1)
+			entries.Close()
+			if len(more) > 0 {
+				return core.Failure("conflict", "the directory is not empty; delete its contents first")
+			}
+		}
+		if err := root.Remove(args.Path); err != nil {
+			return fileError(err)
+		}
+		return core.Result{OK: true, Text: "deleted " + args.Path}
+
 	default:
 		return core.Failure("unknown_tool", "tool is not registered")
 	}

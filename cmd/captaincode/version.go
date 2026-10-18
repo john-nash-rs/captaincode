@@ -52,10 +52,14 @@ Examples:
   captaincode ~/src/myproject                interface on another project
   captaincode . --ide=false                  one-shot answer
   captaincode . --provider openrouter         with a hosted model
+  captaincode . --model openrouter/free       pick a model for one run
   captaincode . --db ~/.local/share/cc.db    choose the database explicitly
 
 --tui was removed. The interface is now the default; use --ide=false for
 the previous one-shot behaviour.
+
+Settings live in one file, ~/.captaincode.json. Use --config to read a
+different one. "captaincode doctor" prints which file is in force.
 
 The database defaults to one file per workspace under the user config
 directory, so separate projects do not collide. It must stay outside the

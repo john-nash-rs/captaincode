@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 type Config struct {
@@ -23,6 +24,64 @@ type Config struct {
 
 func Default() Config {
 	return Config{MaxTurns: 12, MaxToolCalls: 24, ContextBytes: 65536, OutputBytes: 8192, ToolTimeoutSeconds: 15, RunTimeoutSeconds: 180}
+}
+
+// Name is the one configuration file CaptainCode reads.
+const Name = ".captaincode.json"
+
+// Path returns the configuration file, whether or not it exists.
+//
+// There is exactly one, in the home directory. An earlier version searched an
+// environment variable, the project, the home directory, and the user config
+// directory in that order, and every user then had to work out which of the
+// four was theirs and why the one they were editing was being ignored. The
+// project-local entry was the worst of them: it silently shadowed the file
+// holding an API key, and a checkout that happened to include one would
+// change behaviour on someone else's machine.
+//
+// Per-project behaviour is still available, by naming the file:
+// --config ./deploy.json. That is explicit, visible in the command, and
+// reported by doctor.
+func Path() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, Name), nil
+}
+
+// Resolve loads the configuration in force and reports the file it came from.
+//
+// The returned path is where a setting change belongs. It is never empty: with
+// no --config flag it is the single home-directory file, so /openrouter model
+// writes a file the next run will find again.
+//
+// A file named with --config must exist, because asking for a specific file and
+// silently getting defaults instead hides a typo. The home-directory file need
+// not exist.
+func Resolve(explicit string) (Config, string, error) {
+	if explicit != "" {
+		cfg, err := Load(explicit)
+		return cfg, explicit, err
+	}
+	path, err := Path()
+	if err != nil {
+		return Default(), "", err
+	}
+	cfg, err := Load(path)
+	switch {
+	case err == nil:
+		return cfg, path, nil
+	case errors.Is(err, os.ErrNotExist):
+		// Having no configuration at all is ordinary. The path is still
+		// returned so a setting chosen later has somewhere to be written.
+		return Default(), path, nil
+	default:
+		// The file exists but does not parse. Reporting it beats falling
+		// back to defaults, which would leave the broken file in place and
+		// let every later run quietly ignore it.
+		return cfg, path, err
+	}
 }
 
 func Load(path string) (Config, error) {

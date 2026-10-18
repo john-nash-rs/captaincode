@@ -16,6 +16,14 @@ type fakeSettings struct {
 	cleared   bool
 	model     string
 	statusErr string
+	writes    bool
+	commands  bool
+}
+
+func (f *fakeSettings) Grants() (bool, bool) { return f.writes, f.commands }
+func (f *fakeSettings) StoreGrants(w, c bool) error {
+	f.writes, f.commands = w, c
+	return nil
 }
 
 func (f *fakeSettings) Status() (string, string, string) {

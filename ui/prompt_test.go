@@ -117,10 +117,12 @@ func TestTabLeavesUnknownInputAlone(t *testing.T) {
 		}
 	}
 	// A bare slash takes the first suggestion, which is what the list shows.
+	// Asserted against the list rather than a literal, because the first entry
+	// changes as commands are added and this is about the rule, not the order.
 	m.input = []rune("/")
 	m.key(tea.KeyPressMsg{Code: tea.KeyTab})
-	if got := string(m.input); got != "/openrouter" {
-		t.Errorf("Tab on %q produced %q", "/", got)
+	if got, want := string(m.input), commandList[0]; got != want {
+		t.Errorf("Tab on %q produced %q, want %q", "/", got, want)
 	}
 }
 

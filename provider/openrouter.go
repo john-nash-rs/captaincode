@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	openrouter "github.com/OpenRouterTeam/go-sdk"
@@ -94,7 +95,14 @@ type wireMessage struct {
 
 func (p *OpenRouter) Complete(ctx context.Context, history []core.Message, definitions []core.Definition) (core.Message, error) {
 	if p.model() == "" {
-		return core.Message{}, errors.New("configure an explicit OpenRouter model ID")
+		// The bare version of this message used to be the whole of the
+		// help offered, which named the problem but none of the ways to
+		// fix it. Every path below is a complete remedy on its own.
+		return core.Message{}, errors.New("no OpenRouter model is configured; set one with:\n" +
+			"  --model openrouter/free          for this run\n" +
+			"  \"model\" in .captaincode.json     to persist it\n" +
+			"  /openrouter model <id>           inside the interface\n" +
+			"  captaincode doctor --provider openrouter   to see which file is in force")
 	}
 	messages := make([]wireMessage, 0, len(history))
 	for _, message := range history {
@@ -121,7 +129,11 @@ func (p *OpenRouter) Complete(ctx context.Context, history []core.Message, defin
 	}
 	response, err := p.Client.Chat.Send(ctx, request, nil)
 	if err != nil {
-		return core.Message{}, errors.New("OpenRouter request failed; inspect redacted transport diagnostics")
+		// A described failure, carrying the provider's own wording and a
+		// remedy. The old text said only "inspect redacted transport
+		// diagnostics", which named neither the cause nor the way out, and was
+		// identical for a missing model, a refused key and a rate limit.
+		return core.Message{}, parseAPIError(p.model(), err)
 	}
 	if response == nil {
 		return core.Message{}, errors.New("empty provider response")
@@ -181,7 +193,12 @@ func completeMessage(wire wireMessage, reason string) (core.Message, error) {
 	if reason != "stop" && reason != "tool_calls" {
 		return core.Message{}, errors.New("completion did not finish normally")
 	}
-	message := core.Message{Role: "assistant", Content: wire.Content, ProviderData: wire.ReasoningDetails}
+	// Providers emit leading and trailing whitespace inconsistently, and some
+	// prefix replies with blank lines. Left in place it shows up as empty rows
+	// above every answer in the interface and as stray newlines in one-shot
+	// output. Trimming here, where the text first enters, means nothing
+	// downstream has to know which model happened to be chosen.
+	message := core.Message{Role: "assistant", Content: strings.TrimSpace(wire.Content), ProviderData: wire.ReasoningDetails}
 	for _, call := range wire.ToolCalls {
 		if call.Type != "" && call.Type != "function" {
 			return core.Message{}, errors.New("unsupported tool type")

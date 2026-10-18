@@ -34,11 +34,13 @@ func runDoctor(args []string) error {
 	flags := newFlagSet("doctor")
 	asJSON := flags.Bool("json", false, "emit machine-readable JSON")
 	configPath := flags.String("config", "", "configuration file to inspect")
+	provider := flags.String("provider", "fixture", "provider the model is checked against")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
-	checks := []check{platformCheck(), sandboxCheck(*configPath), databaseCheck(), credentialCheck(*configPath)}
+	cfg, resolved, cfgErr := config.Resolve(*configPath)
+	checks := []check{platformCheck(), versionCheck(), configCheck(cfg, resolved, cfgErr, *provider), sandboxCheck(cfg), databaseCheck(), credentialCheck()}
 
 	if *asJSON {
 		encoder := json.NewEncoder(stdout())
@@ -62,34 +64,62 @@ func runDoctor(args []string) error {
 		}
 	}
 	fmt.Fprintln(out)
-	if hasFailure(checks) {
-		fmt.Fprintln(out, "Some required checks failed. CaptainCode will refuse to run tools")
-		fmt.Fprintln(out, "without its sandbox rather than running them unsandboxed.")
+	if failed := failures(checks); len(failed) > 0 {
+		// Name what actually failed. The explanation used to be fixed text
+		// about the sandbox, which was true while that was the only check
+		// able to fail and became a red herring as soon as another could.
+		fmt.Fprintf(out, "Failed: %s.\n", strings.Join(failed, ", "))
+		fmt.Fprintln(out, "CaptainCode will not work around these.")
 		return errChecksFailed
 	}
 	fmt.Fprintln(out, "All required checks passed.")
 	return nil
 }
 
+// suggestedModels are offered when setting a model. They are a starting point,
+// not a curated list: anyone can read a current identifier off openrouter.ai,
+// so pinning a hardcoded set here would rot and look authoritative while doing
+// it. The free tier is listed first because it costs nothing to try.
+var suggestedModels = []string{
+	"openrouter/free",
+	"openai/gpt-4o-mini",
+	"anthropic/claude-sonnet-4.5",
+	"google/gemini-2.0-flash-001",
+	"deepseek/deepseek-chat",
+}
+
 var errChecksFailed = fmt.Errorf("one or more doctor checks failed")
 
-func hasFailure(checks []check) bool {
+func hasFailure(checks []check) bool { return len(failures(checks)) > 0 }
+
+// failures lists the names of the checks that failed, in report order.
+func failures(checks []check) []string {
+	var failed []string
 	for _, c := range checks {
 		if c.Status == "fail" {
-			return true
+			failed = append(failed, c.Name)
 		}
 	}
-	return false
+	return failed
 }
 
 func platformCheck() check {
 	c := check{Name: "platform", Status: "ok", Detail: runtime.GOOS + "/" + runtime.GOARCH}
 	switch runtime.GOOS {
 	case "darwin", "linux":
+	case "windows":
+		// The binary builds and the database lock works here, but there is no
+		// isolation backend, so tools cannot run. Saying "ok" would be the one
+		// thing worse than not building at all.
+		c.Status = "fail"
+		c.Detail = "windows builds, but has no sandbox backend yet"
+		c.Fix = "Talking to a model works on Windows.\n" +
+			"      Running tools does not: there is no isolation backend, and\n" +
+			"      CaptainCode refuses to execute tools unsandboxed."
 	default:
 		c.Status = "fail"
 		c.Detail = runtime.GOOS + " is not supported"
-		c.Fix = "CaptainCode supports macOS and Linux only; the file lock and sandbox worker are platform-specific."
+		c.Fix = "CaptainCode supports macOS and Linux; Windows is partial."
 	}
 	return c
 }
@@ -98,8 +128,7 @@ func platformCheck() check {
 // A missing backend is a failure, not a warning: the harness will refuse to
 // execute tools, so a successful doctor run must not imply the tool path works
 // when it does not.
-func sandboxCheck(configPath string) check {
-	cfg, err := config.Load(configPath)
+func sandboxCheck(cfg config.Config) check {
 	binary := cfg.SandboxBinary
 	if binary == "" {
 		binary = map[string]string{
@@ -165,10 +194,59 @@ func databaseCheck() check {
 	return check{Name: "database", Status: "ok", Detail: target}
 }
 
+// configCheck reports which configuration file is in force and whether it names
+// a model.
+//
+// An empty model is reported rather than left implicit. The failure it causes
+// arrives from deep inside a provider call as "configure an explicit OpenRouter
+// model ID", which names none of the places a model can come from; naming the
+// file that was searched for, and the ways to set one, is the difference
+// between a one-line fix and an afternoon.
+func configCheck(cfg config.Config, resolved string, err error, provider string) check {
+	if err != nil {
+		return check{Name: "config", Status: "fail", Detail: err.Error(), Fix: "Correct the file, or run with --config <path>."}
+	}
+	c := check{Name: "config", Status: "ok", Detail: resolved}
+	switch {
+	case cfg.Model != "":
+		c.Detail += "  model " + cfg.Model
+	case provider == "fixture":
+		c.Detail += "  no model set (the fixture provider needs none)"
+	default:
+		c.Status = "warn"
+		c.Detail += "  no model set"
+		c.Fix = "Set one here:  echo '{\"model\":\"openrouter/free\"}' > " + resolved + "\n" +
+			"      Or for a single run:  captaincode --provider " + provider + " --model openrouter/free .\n" +
+			"      Or inside the interface:  /openrouter model openrouter/free"
+	}
+	return c
+}
+
+// versionCheck catches the single most confusing thing a returning user hits:
+// running an older release than the one that added config auto-loading, so
+// every run starts blind and looks as though settings were never saved.
+//
+// This bit for several rounds of development, and nothing said so, because a
+// stale binary behaves exactly like a broken feature.
+func versionCheck() check {
+	c := check{Name: "version", Status: "ok", Detail: version}
+	if version != "dev" {
+		return c
+	}
+	c.Detail = version + " (unreleased build)"
+	if release, err := newestRelease(); err == nil && release != "" && release != version {
+		c.Status = "warn"
+		c.Detail += "  ·  release " + release + " is newer"
+		c.Fix = "You are running a locally built binary. A published release may differ:\n" +
+			"      captaincode version"
+	}
+	return c
+}
+
 // credentialCheck reports credential presence without ever revealing it. The
 // masked form is produced by the keyring package, which is the only code
 // allowed to hold the raw value.
-func credentialCheck(configPath string) check {
+func credentialCheck() check {
 	if key := strings.TrimSpace(os.Getenv(keyring.EnvVar)); key != "" {
 		return check{Name: "credential", Status: "ok", Detail: "OPENROUTER_API_KEY " + keyring.Masked(key)}
 	}

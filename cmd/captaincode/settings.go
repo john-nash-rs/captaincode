@@ -29,13 +29,15 @@ type settings struct {
 	path     string
 	provider string
 	model    string
+	writes   bool
+	commands bool
 }
 
-func newSettings(configPath, provider, model string) (*settings, error) {
+func newSettings(configPath, provider, model string, writes, commands bool) (*settings, error) {
 	if _, err := keyring.Path(); err != nil {
 		return nil, err
 	}
-	return &settings{path: configPath, provider: provider, model: model}, nil
+	return &settings{path: configPath, provider: provider, model: model, writes: writes, commands: commands}, nil
 }
 
 // Model returns the model identifier currently in force.
@@ -57,13 +59,35 @@ func (s *settings) Status() (provider, model, credential string) {
 	return provider, model, keyring.Masked(key)
 }
 
+// Grants reports the current permissions.
+//
+// They are held in memory as well as in the file, because the sandbox consults
+// them per tool call and a grant given from the interface must apply at once.
+func (s *settings) Grants() (bool, bool) { return s.writes, s.commands }
+
+// StoreGrants persists a permission change and applies it immediately.
+func (s *settings) StoreGrants(writes, commands bool) error {
+	current, err := config.Load(s.path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	current.AllowWrites = writes
+	current.AllowCommands = commands
+	if err := writeConfig(s.path, current); err != nil {
+		return err
+	}
+	s.writes, s.commands = writes, commands
+	return nil
+}
+
 func (s *settings) StoreCredential(key string) error { return keyring.Store(key) }
 
 func (s *settings) ClearCredential() error { return keyring.Clear() }
 
-// StoreModel persists the model identifier to the operator's configuration
-// file, preserving every other setting. An empty path means the harness was
-// started without --config, in which case the value applies to this run only.
+// StoreModel persists the model identifier to the configuration in force,
+// preserving every other setting. When no configuration file existed the path
+// is still the default one, so a model chosen here is picked up by the next run
+// instead of being forgotten when the interface closes.
 func (s *settings) StoreModel(model string) error {
 	s.model = model
 	if s.path == "" {

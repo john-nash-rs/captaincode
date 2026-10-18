@@ -1057,7 +1057,20 @@ type listed struct {
 // which fails silently when it is wrong and gives nothing to choose between.
 func (m *model) openModels() tea.Cmd {
 	if m.info.Browser == nil {
-		m.addLine(m.theme.failure.Render("this build cannot list models; type /openrouter model <id>"))
+		// The old wording blamed the build, which sent people looking for a
+		// packaging fault that did not exist. The usual cause is simply that
+		// the interface was started without --provider openrouter, so name
+		// that first.
+		if m.info.Provider == "fixture" || m.info.Provider == "" {
+			m.addLine(m.theme.failure.Render("The fixture provider has no models."))
+			m.addLine(m.theme.muted.Render("  It is offline and answers one built-in task."))
+			m.addLine(m.theme.muted.Render("  To choose a real model, start with:"))
+			m.addLine(m.theme.phase.Render("    captaincode --provider openrouter <dir>"))
+			m.addLine(m.theme.muted.Render("  then run /models here."))
+			return nil
+		}
+		m.addLine(m.theme.failure.Render("This build cannot list models for " + m.info.Provider))
+		m.addLine(m.theme.muted.Render("  type the identifier instead: /openrouter model <id>"))
 		return nil
 	}
 	m.picking = true
@@ -1703,7 +1716,14 @@ func (m *model) footer(width int) string {
 		provider = "unknown"
 	}
 	model := m.info.Model
-	if model == "" {
+	switch {
+	case provider == "fixture":
+		// The fixture never calls a model. Showing the configured one made the
+		// footer read as though that model was in use, when the run is
+		// answering from a fixed script instead. Saying so is the difference
+		// between a confusing screen and an obvious one.
+		model = "offline, no model needed"
+	case model == "":
 		model = "no model configured"
 	}
 	mode := "read-only"
@@ -1731,6 +1751,11 @@ func (m *model) footer(width int) string {
 // setup right up until the first request fails. An unverified connection is
 // labelled as such rather than left to look healthy.
 func (m *model) connection() string {
+	// The fixture needs no connection, so claiming "unverified" about it would
+	// imply something is wrong when nothing is pending.
+	if m.info.Provider == "fixture" {
+		return m.theme.muted.Render("ready")
+	}
 	switch {
 	case m.checking:
 		return m.theme.muted.Render("checking…")

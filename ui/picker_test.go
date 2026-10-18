@@ -365,7 +365,7 @@ func TestPickerWithoutABrowserExplainsItself(t *testing.T) {
 	if m.picking {
 		t.Fatal("the picker opened with no browser")
 	}
-	if !strings.Contains(joined(m), "type /openrouter model <id>") {
+	if !strings.Contains(joined(m), "/openrouter model <id>") {
 		t.Fatalf("no fallback is offered:\n%s", joined(m))
 	}
 }

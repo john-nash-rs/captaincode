@@ -89,8 +89,24 @@ homebrew_casks:
     description: A single-user coding-agent harness
     # GoReleaser infers the binary name from the archive contents; the
     # singular `binary` key is deprecated in favour of letting it default.
-    # No .app payload, so no quarantine caveat is needed: cask installs that
-    # stage a bare binary do not trigger Gatekeeper the way an app bundle does.
+    #
+    # Homebrew strips the quarantine attribute from an .app bundle on install
+    # but does not do so for a cask that stages a bare binary. The download
+    # therefore arrives quarantined, and the first run stops at Gatekeeper with
+    # "Apple could not verify captaincode is free of malware" — which reads as
+    # the release being unsafe rather than the install being incomplete. It
+    # happened to every macOS user, on every install.
+    #
+    # There is no postflight field in GoReleaser's cask type, so custom_block
+    # injects the stanza directly. must_succeed is false because the
+    # attribute is absent on Linux, where xattr does not exist, and an install
+    # must not fail over a macOS-only concern.
+    custom_block: |
+      postflight do
+        system_command "/usr/bin/xattr",
+                      args: ["-dr", "com.apple.quarantine", "#{staged_path}/captaincode"],
+                      must_succeed: false
+      end
     # GoReleaser's HomebrewCask type has no `test` field in v2.18, so the
     # smoke test is carried in the tap README and run by the tap repository's
     # own CI instead of being generated into the cask.

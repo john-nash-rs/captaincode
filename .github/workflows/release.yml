@@ -103,26 +103,41 @@ jobs:
           rm -rf ./dist-check
 
       # The tap repository is a separate repository. GITHUB_TOKEN cannot write
-      # to it, so publishing the cask requires a token with write access to
-      # john-nash-rs/homebrew-tap. If the secret is absent the release still
-      # publishes; only the cask update is skipped, and it says so.
-      - name: Publish the release and update the Homebrew cask
+      # to it, so publishing the cask requires HOMEBREW_TAP_TOKEN.
+      #
+      # That token is a deployment concern, not a release concern, and
+      # conflating the two has cost three failed-looking releases in a row:
+      # every artifact published correctly and the run was still marked red
+      # because the last step could not reach the tap. The cask is therefore
+      # published in its own job, after the release, where a failure is
+      # reported as what it is.
+      - name: Publish the release
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
           version: v2.18.3
-          args: release --clean
+          # homebrew is skipped here and done in the publish-cask job below,
+          # where its failure cannot mark a good release as failed.
+          args: release --clean --skip=homebrew
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Required only for the Homebrew tap push. Scoped to that one
-          # repository; grant it no other access.
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # The generated cask is carried across as an artifact. Without this the
+      # only copy lives in the release job's filesystem, which ends with it.
+      - name: Save the generated cask
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: homebrew-cask
+          path: dist/homebrew/Casks/captaincode.rb
+          if-no-files-found: ignore
+          retention-days: 7
 
       # The token is passed through env and referenced as a shell variable.
       # Interpolating ${{ secrets.* }} directly into a run block embeds the
       # secret value in the rendered script, where a quote or $(...) in the
       # token would break or inject into the shell.
-      - name: Report cask publication status
+      - name: Report cask generation status
         if: always()
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -135,7 +150,99 @@ jobs:
               echo "NOT pushed to john-nash-rs/homebrew-tap. Copy it manually:"
               echo "  cp dist/homebrew/Casks/captaincode.rb \\"
               echo "     <homebrew-tap-repo>/Casks/captaincode.rb"
-            else
-              echo "Cask pushed to the tap repository."
             fi
           fi
+
+  # Publishing the cask is separate from publishing the release.
+  #
+  # The release is the thing that must not fail silently; the cask is a
+  # convenience for one installer on one platform. Coupling them meant a token
+  # problem made a perfectly good release look broken, which is the opposite
+  # of useful: the artifacts were there and the signal was noise.
+  #
+  # This job never fails the workflow. It reports what happened so the gap is
+  # visible, and it names the exact command to run when the token is missing
+  # or rejected.
+  publish-cask:
+    name: publish cask to the tap
+    needs: release
+    runs-on: ubuntu-24.04
+    # Reported, not enforced. A rejected tap token must not make a published
+    # release look like a failed one.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: homebrew-cask
+          path: cask
+      - name: Push the cask
+        env:
+          # Referenced through the environment and never interpolated into
+          # the script, so a quote in the value cannot inject into the shell.
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          # The artifact holds the cask, but upload-artifact preserves the
+          # path under the least common ancestor, so it may land either at the
+          # root of the download directory or under Casks/.
+          file=""
+          for candidate in cask/Casks/captaincode.rb cask/captaincode.rb; do
+            if [ -f "$candidate" ]; then file=$candidate; break; fi
+          done
+          if [ -z "$file" ]; then
+            echo "no cask was generated; nothing to publish"
+            exit 0
+          fi
+
+          # An empty or whitespace-only token is sent as "Bearer " and comes
+          # back 401, which reads exactly like an invalid token. Say so.
+          case "$(printf '%s' "$TAP_TOKEN" | tr -d '[:space:]')" in
+            "") echo "HOMEBREW_TAP_TOKEN is empty. Set it with:"
+               echo "  gh secret set HOMEBREW_TAP_TOKEN --repo john-nash-rs/captaincode"
+               exit 0 ;;
+          esac
+
+          # Check the credential before using it, so the failure names the
+          # token rather than whatever GoReleaser would have said.
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $TAP_TOKEN" \
+            https://api.github.com/repos/john-nash-rs/homebrew-tap)
+          if [ "$code" != "200" ]; then
+            echo "the token was rejected: HTTP $code"
+            echo ""
+            echo "It needs, on john-nash-rs/homebrew-tap:"
+            echo "  - Contents: Read and write"
+            echo "  - that repository selected explicitly, not 'public repositories'"
+            echo ""
+            echo "Verify with:"
+            echo "  curl -s -o /dev/null -w '%{http_code}\\n' \\"
+            echo "    -H \"Authorization: Bearer \$TAP_TOKEN\" \\"
+            echo "    https://api.github.com/repos/john-nash-rs/homebrew-tap"
+            echo ""
+            echo "The release itself is published. Push the cask by hand with:"
+            echo "  gh api --method PUT repos/john-nash-rs/homebrew-tap/contents/Casks/captaincode.rb \\"
+            echo "    -f message='Update cask to $TAG' -f content=\"\$(base64 < $file | tr -d '\n')\" \\"
+            echo "    -f sha=\"\$(gh api repos/john-nash-rs/homebrew-tap/contents/Casks/captaincode.rb --jq .sha)\""
+            exit 0
+          fi
+          echo "token accepted"
+
+          sha=$(gh api "repos/john-nash-rs/homebrew-tap/contents/Casks/captaincode.rb" --jq .sha 2>/dev/null || echo "")
+          if [ -n "$sha" ]; then
+            gh api --method PUT repos/john-nash-rs/homebrew-tap/contents/Casks/captaincode.rb \
+              -f message="Update cask to $TAG" \
+              -f content="$(base64 < "$file" | tr -d '\n')" \
+              -f sha="$sha" > /dev/null
+          else
+            gh api --method PUT repos/john-nash-rs/homebrew-tap/contents/Casks/captaincode.rb \
+              -f message="Add cask" \
+              -f content="$(base64 < "$file" | tr -d '\n')" > /dev/null
+          fi
+          echo "cask pushed to john-nash-rs/homebrew-tap for $TAG"

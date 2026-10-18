@@ -16,7 +16,16 @@ import (
 // callback; Command, which builds the isolation profile, read the Registry
 // field frozen at startup. The result was a grant that looked completely
 // effective until the OS refused the write — "the system did not allow it".
+//
+// macOS only. The assertions below read the sandbox-exec profile, and the Linux
+// backend expresses the same decision as a different flag in a different
+// command line. Running this on Linux failed on the string comparison rather
+// than on any behaviour, which is how it was found: CI runs both platforms and
+// a macOS-only assertion had been passing locally the whole time.
 func TestIsolationProfileFollowsTheLiveGrant(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("asserts on the macOS sandbox-exec profile; see TestGrantedSessionProducesARealFile for the portable check")
+	}
 	if testing.Short() {
 		t.Skip("exercises the real sandbox")
 	}

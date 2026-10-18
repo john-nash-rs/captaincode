@@ -182,10 +182,15 @@ Remove the credential file if you are uninstalling for security reasons.
 is not on `PATH`. The installer prints the exact line to add. For `~/.local/bin`:
 
 ```sh
-sh   -c 'echo "export PATH=\"$HOME/.local/bin:$PATH\"" >> ~/.profile'
-zsh  -c 'echo "export PATH=\"$HOME/.local/bin:$PATH\"" >> ~/.zshrc'
-bash -c 'echo "export PATH=\"$HOME/.local/bin:$PATH\"" >> ~/.bashrc'
+# pick the one matching your shell
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc    # zsh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc   # bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile  # sh
 ```
+
+The single quotes matter. With double quotes, `$HOME` and `$PATH` expand when
+the line is written, baking the current shell's values into the file; single
+quotes leave them to expand when each new shell starts.
 
 Then open a new shell. Confirm with `captaincode version`.
 

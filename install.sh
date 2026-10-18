@@ -293,13 +293,23 @@ case ":${PATH:-}:" in
 	*":$INSTALL_DIR:"*) ;;
 	*)
 		info ""
-		info "$INSTALL_DIR is not on your PATH. Add it:"
+		info "$INSTALL_DIR is not on your PATH. Add it with:"
 		info ""
-		info "    sh   -c 'echo \"export PATH=\"\$HOME/.local/bin:\$PATH\" >> ~/.profile'"
-		info "    zsh  -c 'echo \"export PATH=\"\$HOME/.local/bin:\$PATH\" >> ~/.zshrc'"
-		info "    bash -c 'echo \"export PATH=\"\$HOME/.local/bin:\$PATH\" >> ~/.bashrc'"
+		# The variable is single-quoted on purpose. Double quotes would expand
+		# $HOME and $PATH now, baking this shell's values into the file, and a
+		# nested shell -c with its own quoting cannot be pasted reliably.
+		case "${SHELL:-}" in
+			*/zsh)
+				info "    echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc" ;;
+			*/bash)
+				info "    echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc" ;;
+			*)
+				info "    echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.profile" ;;
+		esac
 		info ""
-		info "Then open a new shell, or run: export PATH=\"\$INSTALL_DIR:\$PATH\""
+		info "Then open a new shell, or run:"
+		info ""
+		info "    export PATH=\"\$INSTALL_DIR:\$PATH\""
 		;;
 esac
 

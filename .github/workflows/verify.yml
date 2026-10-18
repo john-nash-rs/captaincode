@@ -28,3 +28,13 @@ jobs:
         # --ide=false because the interface is now the default and needs a
         # terminal, which a runner does not provide.
         run: ./bin/captaincode ./testdata/project --ide=false --db "$RUNNER_TEMP/captaincode-smoke.db"
+      - name: Release gate
+        # Runs the whole user journey against the binary that was just built,
+        # not against the test tree. A release is judged on the artifact, so
+        # that is what gets judged here.
+        #
+        # The journey is offline by design, so this needs no credential and
+        # cannot pass by accident on a developer's machine.
+        env:
+          CAPTAINCODE_TEST_BINARY: ${{ github.workspace }}/bin/captaincode
+        run: go test -count=1 -v ./evals/ -run 'Journey'

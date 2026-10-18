@@ -106,9 +106,10 @@ func run() error {
 		*workspace = positional[0]
 		positional = positional[1:]
 	}
+	if *workspace == "" && len(positional) == 0 {
+		*workspace = "."
+	}
 	switch {
-	case *workspace == "":
-		return errors.New("no project directory given\n  try: captaincode .")
 	case len(positional) > 0:
 		return fmt.Errorf("unexpected argument %q\n  try: captaincode %s", positional[0], *workspace)
 	}

@@ -254,16 +254,12 @@ add `--ide=false` for one-shot output.
 **`the interface needs a terminal on stdin and stdout`.** You are running
 without an interactive terminal — a pipe, a script, or CI. Add `--ide=false`.
 
-**`no project directory given`.** Pass the project as the first argument:
-`captaincode .`
-
 ## Quick start
 
-The project directory is the **first argument**. It is never inferred, because
-tools execute against it.
+Run in the current project:
 
 ```sh
-captaincode ./myproject --ide=false
+captaincode --ide=false
 ```
 
 ```
@@ -271,11 +267,22 @@ The project version is 2.5.0 (package.json).
 Run: 526e845c47c9161ecafe395fe6776714
 ```
 
+Run in another project:
+
+```sh
+captaincode ./myproject --ide=false
+```
+
 Omit `--ide=false` to get the interactive interface instead:
 
 ```sh
 captaincode ./myproject
+captaincode
 ```
+
+Flags may appear before or after the directory. `--tui` was removed in 0.2.0;
+the interface is the default and `--ide=false` selects the previous one-shot
+behaviour.
 
 Flags may appear before or after the directory. `--tui` was removed in 0.2.0;
 the interface is the default and `--ide=false` selects the previous one-shot

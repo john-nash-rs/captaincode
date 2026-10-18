@@ -67,11 +67,17 @@ func TestRunWithoutProviderFlagUsesTheConfiguredMachine(t *testing.T) {
 		[]byte(`{"model":"z-ai/glm-5.3"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(home, "Library", "Application Support", "captaincode")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	// The credential goes where the keyring keeps it on this platform, not
+	// where it happens to be on the machine the test was written on. Hardcoding
+	// the macOS location made this pass locally and fail on every Linux build.
+	key, err := keyring.Path()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "openrouter.key"), []byte("sk-or-v1-KEY\n"), 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Dir(key), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(key, []byte("sk-or-v1-KEY\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

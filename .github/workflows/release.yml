@@ -118,9 +118,28 @@ jobs:
           version: v2.18.3
           # homebrew is skipped here and done in the publish-cask job below,
           # where its failure cannot mark a good release as failed.
+          #
+          # --skip also suppresses generating the cask, not just pushing it,
+          # so the cask is built afterwards from the checksums this release
+          # just published. Those are the same digests Homebrew verifies
+          # against, so the two cannot disagree.
           args: release --clean --skip=homebrew
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate the cask
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          mkdir -p cask
+          curl -fsSL -o checksums.txt \
+            "https://github.com/john-nash-rs/captaincode/releases/download/$TAG/checksums.txt"
+          go run ./cmd/mkcask -tag "$TAG" -checksums checksums.txt -out cask/captaincode.rb
+          echo "generated:"
+          head -4 cask/captaincode.rb
 
       # The generated cask is carried across as an artifact. Without this the
       # only copy lives in the release job's filesystem, which ends with it.
@@ -129,29 +148,15 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: homebrew-cask
-          path: dist/homebrew/Casks/captaincode.rb
-          if-no-files-found: ignore
+          path: cask/captaincode.rb
+          if-no-files-found: warn
           retention-days: 7
 
       # The token is passed through env and referenced as a shell variable.
       # Interpolating ${{ secrets.* }} directly into a run block embeds the
       # secret value in the rendered script, where a quote or $(...) in the
       # token would break or inject into the shell.
-      - name: Report cask generation status
-        if: always()
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          if [ -f dist/homebrew/Casks/captaincode.rb ]; then
-            echo "Cask generated at dist/homebrew/Casks/captaincode.rb"
-            if [ -z "$TAP_TOKEN" ]; then
-              echo ""
-              echo "HOMEBREW_TAP_TOKEN is not configured, so the cask was"
-              echo "NOT pushed to john-nash-rs/homebrew-tap. Copy it manually:"
-              echo "  cp dist/homebrew/Casks/captaincode.rb \\"
-              echo "     <homebrew-tap-repo>/Casks/captaincode.rb"
-            fi
-          fi
+      
 
   # Publishing the cask is separate from publishing the release.
   #

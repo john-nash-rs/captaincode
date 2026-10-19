@@ -46,9 +46,12 @@ build)
 	;;
 
 eval)
-	# CAPTAINCODE_EVAL_KEY_FILE tells the evals where the credential is. They
-	# skip rather than fail when it is absent.
-	CAPTAINCODE_EVAL_KEY_FILE="$KEYFILE" go test ./evals/ -run TestLive -v -count=1
+	# The evals read CAPTAINCODE_EVAL_KEY first, then the file named by
+	# CAPTAINCODE_EVAL_KEY_FILE, and skip rather than fail when neither is set.
+	# The default matches what key() falls back to, so `./t.sh eval` finds the
+	# same credential the other targets use.
+	CAPTAINCODE_EVAL_KEY_FILE="${CAPTAINCODE_EVAL_KEY_FILE:-$HOME/.captaincode-eval-key}" \
+		go test ./evals/ -run TestLive -v -count=1
 	;;
 
 doctor)

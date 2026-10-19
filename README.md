@@ -1,20 +1,58 @@
 # CaptainCode
 
-A single-user coding-agent harness in Go. CaptainCode wraps a language model in
-the software required to use one safely: an explicit tool contract, a bounded
-agent loop, filesystem sandboxing, durable run state, and a terminal interface
-that reports what the system is actually doing.
+**A coding agent you can audit, because a model's output is a request, not an action.**
 
-The project is built around a single idea: **a model's output is a request, not
-an action.** Every guarantee CaptainCode makes — bounded execution, recorded
-observations, recoverable runs, visible permissions — follows from keeping that
-distinction explicit.
+[![CI](https://github.com/john-nash-rs/captaincode/actions/workflows/verify.yml/badge.svg)](https://github.com/john-nash-rs/captaincode/actions/workflows/verify.yml)
+[![Release](https://img.shields.io/github/v/release/john-nash-rs/captaincode?label=release)](https://github.com/john-nash-rs/captaincode/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+[![platform](https://img.shields.io/badge/macOS%20%7C%20Linux-informational?logo=apple&logoColor=white)](https://github.com/john-nash-rs/captaincode#supported-platforms)
+
+An agent harness in Go, for one person on one machine. It wraps a model in an
+explicit tool contract, a bounded agent loop, OS-enforced sandboxing, and durable
+run state — so that what the system did is a matter of record rather than of
+trust.
 
 > **Status: 0.3.3.** A single-operator tool, not a hosted service. It is designed
 > to be read, run, and audited. It is not hardened for multi-tenancy or
 > adversarial use. See [Limitations](#limitations).
 
 ![CaptainCode terminal interface](docs/tui.svg)
+
+```sh
+brew install john-nash-rs/tap/captaincode      # or the one-line installer below
+captaincode                                   # then type /connect
+```
+
+[Installation](#installation) · [Commands](#commands) · [Design](#design) ·
+[Limitations](#limitations) · [Contributing](#contributing)
+
+## Should you use this?
+
+Probably not, unless some of these are true of you:
+
+- **You need to know what your agent actually did.** Every tool call is recorded
+  with its real output. Nothing is inferred from what the model says it did.
+- **You want to read the harness, not just run it.** Eight packages, about 12k
+  lines of Go including tests, no framework, no runtime dependency.
+- **You are running one model against one project** and want that to be auditable
+  end to end.
+
+**And explicitly not, if any of these are true:**
+
+- **You need Windows.** There is no Windows build. The source compiles, but
+  there is no isolation backend, and CaptainCode refuses to run tools unsandboxed
+  rather than run them unsandboxed and call it a feature.
+- **You want per-command approval prompts.** Permissions are coarse
+  project-wide grants. There is no "allow this one call?" dialog.
+- **You want the smallest thing that works.** This is more machinery than a
+  script that shells out to `claude -p`.
+- **You need it to be fast at scale.** The core loop is serial and has no
+  concurrent scheduler outside the labs.
+
+If none of that sounds like your problem, [Aider](https://github.com/Aider-AI/aider),
+[opencode](https://github.com/sst/opencode), or
+[Claude Code](https://github.com/anthropics/claude-code) will serve you better.
 
 ## Why it exists
 
@@ -58,13 +96,13 @@ it becomes a blocked run that requires a human.
 ### Homebrew
 
 ```sh
-brew tap john-nash-rs/tap && brew install captaincode
+brew install john-nash-rs/tap/captaincode
 ```
 
-Or without tapping first:
+No tap step needed. To tap first and install unpinned by formula name:
 
 ```sh
-brew install john-nash-rs/tap/captaincode
+brew tap john-nash-rs/tap && brew install captaincode
 ```
 
 ### Shell installer
@@ -75,8 +113,7 @@ curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/insta
 
 > **This is the current, working URL.** No custom domain has been configured,
 > so the installer is served from the repository. If one is published later,
-> `install.sh` and this section are updated together and the short form becomes
-> `curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh`.
+> `install.sh` and this section are updated together.
 
 The installer resolves the latest release through the GitHub API, downloads
 the archive for your platform, verifies its SHA-256 against the release's
@@ -98,6 +135,9 @@ sh install.sh --help
 > less install.sh
 > sh install.sh
 > ```
+>
+> It is 326 lines and its only network fetches are the release metadata, your
+> platform's archive, and `checksums.txt`.
 
 ### Manual download
 
@@ -684,6 +724,16 @@ material ones:
 - Unknown mutations **block** for reconciliation.
 - The terminal interface has no live-token rendering, no approval dialog, and no
   conversation steering.
+
+## Contributing
+
+Issues and pull requests are both welcome. The most useful contributions are a
+Windows sandbox backend, a benchmark with its method stated, and a concurrency
+scheduler for the serial core loop.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for what is welcome, what will be
+declined, and why. For a security problem, please do not open a public issue —
+see [SECURITY.md](SECURITY.md).
 
 ## License
 

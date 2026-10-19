@@ -64,7 +64,7 @@ func TestIntentAndResultAreDurableAtTheirBoundaries(t *testing.T) {
 	if err != nil || run.Phase != "completed" || tools.executed != 1 || len(run.Messages) != 5 {
 		t.Fatal(run, err)
 	}
-	if store.run.Messages[3].CallID != "fixture-read-1" {
+	if store.run.Messages[3].CallID != store.run.Messages[2].Calls[0].ID {
 		t.Fatal("result lost correlation")
 	}
 }

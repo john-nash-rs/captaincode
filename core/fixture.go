@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -25,19 +26,28 @@ func (Fixture) Complete(ctx context.Context, history []Message, definitions []De
 	if last.Role == "tool" {
 		return Fixture{}.reported(history)
 	}
-	// Whether the request is a create request, and whether writing is
-	// available, are separate questions: the first decides whether to engage,
-	// the second decides whether it can be carried out.
+	// A call ID must be unique across a whole conversation: the engine refuses
+	// a reply that reuses an ID already on the record, and a follow-up carries
+	// the earlier turns with it. A constant ID therefore made the second prompt
+	// of a session fail. A real provider generates an ID per call; this does
+	// the same, because a counter can repeat after a restart and the history the
+	// engine checks is not always the history this model is shown.
 	file, asked := createRequest(last.Content)
 	switch {
 	case asked && offers(definitions, "write_file"):
+		file.ID = callID("write")
 		return Message{Role: "assistant", Calls: []Call{file}}, nil
 	case asked:
 		// Saying so is better than quietly falling back to the read task,
 		// which would look like the request was ignored.
 		return Message{Role: "assistant", Content: "I cannot create files: writing is not enabled. Run /permissions writes on."}, nil
 	}
-	return Message{Role: "assistant", Calls: []Call{{ID: "fixture-read-1", Name: "read_file", Arguments: json.RawMessage(`{"path":"package.json"}`)}}}, nil
+	return Message{Role: "assistant", Calls: []Call{{ID: callID("read"), Name: "read_file", Arguments: json.RawMessage(`{"path":"package.json"}`)}}}, nil
+}
+
+// callID is a fresh identifier in the same shape a provider would supply.
+func callID(kind string) string {
+	return "fixture-" + kind + "-" + rand.Text()
 }
 
 func offers(definitions []Definition, name string) bool {
@@ -93,5 +103,5 @@ func createRequest(prompt string) (Call, bool) {
 	if err != nil {
 		return Call{}, false
 	}
-	return Call{ID: "fixture-write-1", Name: "write_file", Arguments: arguments}, true
+	return Call{Name: "write_file", Arguments: arguments}, true
 }

@@ -220,9 +220,6 @@ type model struct {
 	loading  bool
 	listErr  string
 	modelsAt int // list length at the last render, for the click mapping
-	// pendingFilter is the text typed before the last backspace, kept so
-	// deleting back to empty restores the full list rather than an empty one.
-	pendingFilter []rune
 }
 
 // theme holds the styles used to render. A zero theme paints plain text, which
@@ -473,9 +470,11 @@ func (m *model) paste(text string) (tea.Model, tea.Cmd) {
 	if text == "" {
 		return m, nil
 	}
-	// A model identifier pasted into the model picker selects it directly
-	// rather than being filtered character by character.
+	// A model identifier pasted into the model picker becomes the filter
+	// directly rather than being added character by character. The editor
+	// shows it, because in this mode the editor *is* the filter.
 	if m.picking {
+		m.query = []rune(text)
 		return m, m.filterModels(text)
 	}
 	room := inputLimit - len(m.input)
@@ -591,10 +590,10 @@ func (m *model) key(item tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if len(m.query) > 0 {
 				m.query = m.query[:len(m.query)-1]
 			}
-			// Backspacing to nothing restores the full list rather than an
-			// empty one, which is what filtering an empty query should mean.
-			m.query = append(m.query, m.pendingFilter...)
-			return m, nil
+			// Deleting re-queries with what is left. An empty filter asks for
+			// the full list, so backspacing to nothing restores it rather than
+			// showing no models.
+			return m, m.filterModels(string(m.query))
 		}
 		if len(m.input) > 0 {
 			m.input = m.input[:len(m.input)-1]
@@ -1083,7 +1082,6 @@ func (m *model) openModels() tea.Cmd {
 	m.picking = true
 	m.query, m.pick, m.listErr = nil, 0, ""
 	m.loading = true
-	m.pendingFilter = nil
 	m.addLine(m.theme.brand.Render("Choose a model"))
 	m.addLine(m.theme.muted.Render("  type to filter · up/down or click · enter to select · esc to cancel"))
 	return m.fetchModels("")
@@ -1105,7 +1103,6 @@ func (m *model) fetchModels(query string) tea.Cmd {
 
 // filterModels re-queries the list as text is typed.
 func (m *model) filterModels(query string) tea.Cmd {
-	m.pendingFilter = []rune(query)
 	m.loading = true
 	return m.fetchModels(query)
 }

@@ -281,29 +281,73 @@ func runAll(m *model, text string) {
 	}
 }
 
-// Deleting back to an empty filter must restore the full list, not leave an
-// empty screen that looks like there are no models.
-func TestPickerClearingTheFilterRestoresTheList(t *testing.T) {
+// Backspace deletes exactly one character and re-queries with what is left,
+// and taken all the way back it restores the full list.
+//
+// It used to re-append the previous filter to the shortened query, so the
+// visible query grew instead of shrinking, and it returned no command, so the
+// list never moved. The old test hid both by fetching the full list by hand
+// after the backspaces instead of running what the handler returned.
+func TestPickerBackspaceRefilters(t *testing.T) {
 	m := pickerModel(&fakeSettings{}, &fakeBrowser{models: catalogue()})
 	m.picking = true
-	typeText(m, "claude")
-	m.Update(m.fetchModels("claude")())
+	runAll(m, "claude")
+	if got := string(m.query); got != "claude" {
+		t.Fatalf("query after typing = %q, want claude", got)
+	}
 	if len(m.found) != 1 {
-		t.Fatalf("filter failed: %v", m.found)
+		t.Fatalf("filtering to claude found %v", m.found)
 	}
 
+	// One press: one character gone, and the list re-queried through the
+	// command the handler returns.
+	_, cmd := m.key(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if cmd == nil {
+		t.Fatal("backspace returned no command, so the list never re-queries")
+	}
+	m.Update(cmd())
+	if got := string(m.query); got != "claud" {
+		t.Fatalf("query after one backspace = %q, want claud", got)
+	}
+	if len(m.found) != 1 || m.found[0].ID != "anthropic/claude-sonnet-4.5" {
+		t.Fatalf("the list was not refiltered: %v", m.found)
+	}
+
+	// Delete the rest. A no-match query must not be mistaken for the end.
 	runAll(m, "zzz-nothing")
 	if len(m.found) != 0 {
 		t.Fatalf("expected no matches, got %v", m.found)
 	}
-
-	// Backspace the whole filter away.
-	for range len(m.query) + 1 {
-		m.key(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	for len(m.query) > 0 {
+		_, cmd := m.key(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		if cmd != nil {
+			m.Update(cmd())
+		}
 	}
-	m.Update(m.fetchModels("")())
 	if len(m.found) != 3 {
 		t.Fatalf("clearing the filter did not restore the list: %v", m.found)
+	}
+}
+
+// A model identifier pasted into the picker becomes the filter, and the editor
+// shows it: in this mode the editor is the filter, so an empty-looking prompt
+// above a one-row list would be a lie.
+func TestPickerPasteBecomesTheVisibleFilter(t *testing.T) {
+	m := pickerModel(&fakeSettings{}, &fakeBrowser{models: catalogue()})
+	m.picking = true
+	_, cmd := m.Update(tea.PasteMsg{Content: "anthropic/claude-sonnet-4.5"})
+	if cmd == nil {
+		t.Fatal("pasting a model id started no query")
+	}
+	m.Update(cmd())
+	if got := string(m.query); got != "anthropic/claude-sonnet-4.5" {
+		t.Fatalf("query = %q, want the pasted id", got)
+	}
+	if !strings.Contains(m.inputBox(80), "anthropic/claude") {
+		t.Fatalf("the editor does not show the filter:\n%s", m.inputBox(80))
+	}
+	if len(m.found) != 1 {
+		t.Fatalf("pasting an id did not narrow the list: %v", m.found)
 	}
 }
 

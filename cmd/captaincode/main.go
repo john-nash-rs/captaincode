@@ -247,6 +247,10 @@ func run() error {
 			fmt.Fprintf(os.Stderr, "starting a new conversation: %v\n", err)
 		},
 	}
+	// The interface pages back through this conversation, so it has to know
+	// which one that is before the first prompt: after --resume the earlier
+	// exchanges are already in storage and belong on screen from the start.
+	conv := &conversationID{id: *resume}
 	runOne := func(parent context.Context, prompt string, emit func(core.Event)) (string, error) {
 		ctx, cancel := context.WithTimeout(parent, time.Duration(cfg.RunTimeoutSeconds)*time.Second)
 		defer cancel()
@@ -256,6 +260,9 @@ func run() error {
 		if err != nil {
 			return "", err
 		}
+		// Which conversation this is only settles once a prompt is resolved:
+		// the first one mints a conversation, later ones continue it.
+		conv.set(state.ID)
 		resumed := *resume != ""
 		if resumed {
 			if err := engine.Recover(&state); err != nil {
@@ -266,7 +273,9 @@ func run() error {
 			return "", fmt.Errorf("run %s: %w", state.ID, err)
 		}
 		conversation.record(state)
-		return fmt.Sprintf("%s\nRun: %s", state.Messages[len(state.Messages)-1].Content, state.ID), nil
+		answer := state.Messages[len(state.Messages)-1].Content
+		recordTurn(database, state, prompt, answer)
+		return fmt.Sprintf("%s\nRun: %s", answer, state.ID), nil
 	}
 	*resume = conversation.resume
 	if *ide {
@@ -291,6 +300,9 @@ func run() error {
 			// Offered as examples while setting a model. Anyone can read a
 			// model identifier off a web page; nobody remembers one.
 			Models: suggestedModels,
+			// Scrolling back past what the interface holds pages in the
+			// earlier exchanges of this conversation.
+			History: history{db: database, conv: conv},
 		})
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

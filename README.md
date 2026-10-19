@@ -511,16 +511,21 @@ promoted ahead of what actually works.
 
 ### Reading back
 
-The conversation is written to the terminal as it happens, so the terminal's own
-scrollback holds all of it. The wheel, the scrollbar, the mouse drag, and the
-terminal's search all work over the whole session, exactly as they do for
-`git log` or a compiler. Output fills the screen from the top and older answers
-scroll away above the prompt as new ones arrive.
+The transcript is drawn by the harness, in the window above the prompt. The
+arrow keys, `PgUp`/`PgDn`, `Home`/`End`, and the mouse wheel scroll it, and the
+prompt stays where it is. Output arrives at the bottom and pushes older answers
+up the way a page of text grows, so a long answer never carries the composer off
+screen with it.
 
-Nothing is captured while you are reading: the interface asks for mouse reporting
-only while the command menu or the model picker is on screen, and releases it the
-moment that closes. The arrows belong to whichever list is open, so a model can
-still be chosen; there is no in-frame scrolling to compete with the terminal's.
+Scrolling back reaches the whole conversation. A resumed run opens with its
+earlier exchanges already in the window; reaching the top loads more from the
+store a screen ahead of where you are reading, so the scroll never waits on it.
+The window holds the conversation you are in — starting a new one starts a new
+transcript.
+
+Mouse reporting is held for the session, because the wheel drives the scroll.
+The terminal's own drag-select then needs its modifier (usually shift or
+option), which is the usual trade for a full-screen interface.
 
 Credentials resolve per request, so rotating a key or changing a model takes
 effect immediately.

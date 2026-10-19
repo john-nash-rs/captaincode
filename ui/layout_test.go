@@ -27,33 +27,34 @@ func longReplyModel(height int) *model {
 	return m
 }
 
-// The report: a code request produced an empty screen. Output no longer lives
-// in the frame, so the assertion moves to what is committed for printing: the
-// answer must be in the queue in full, whatever the terminal height.
+// The report: a code request produced an empty screen. The answer is longer
+// than the window, so it cannot all be on screen at once; what must hold is
+// that the record keeps it whole, and that the window always shows the newest
+// of it with the prompt under it, at every terminal height.
 func TestLongReplyIsNotBlank(t *testing.T) {
 	for _, height := range []int{10, 16, 24, 40, 80} {
 		m := longReplyModel(height)
-		committed := strings.Join(m.pending, "\n")
-		if strings.TrimSpace(committed) == "" {
-			t.Fatalf("height %d committed nothing", height)
+		if !strings.Contains(strings.Join(m.lines, "\n"), "def add") {
+			t.Errorf("height %d lost the start of the answer", height)
 		}
-		if !strings.Contains(committed, "def add") {
-			t.Errorf("height %d dropped the start of the answer:\n%s", height, committed)
+		frame := m.View().Content
+		if strings.TrimSpace(frame) == "" {
+			t.Fatalf("height %d rendered nothing", height)
 		}
-		if !strings.Contains(committed, "calculator") {
-			t.Errorf("height %d dropped the question:\n%s", height, committed)
+		if !strings.Contains(frame, "›") {
+			t.Errorf("height %d lost the prompt:\n%s", height, frame)
 		}
 	}
 }
 
-// The frame holds only the composer, so it must never be taller than the
-// terminal: the renderer discards the top rows of an oversized frame, which
-// would take the editor with it.
+// The frame holds the transcript and the composer, and must never be taller
+// than the terminal: the renderer discards the top rows of an oversized frame,
+// which would take the editor with it.
 func TestFrameNeverOverflowsTheTerminal(t *testing.T) {
 	for _, height := range []int{8, 12, 24, 40, 80} {
 		m := longReplyModel(height)
 		frame := m.View().Content
-		if got := strings.Count(frame, "\n") + 1; got > height {
+		if got := strings.Count(strings.TrimRight(frame, "\n"), "\n") + 1; got > height {
 			t.Errorf("height %d produced a frame of %d rows", height, got)
 		}
 		if !strings.Contains(frame, "›") {
@@ -62,17 +63,21 @@ func TestFrameNeverOverflowsTheTerminal(t *testing.T) {
 	}
 }
 
-// A single line taller than the terminal must still be committed, and must not
+// A single line taller than the terminal must still be recorded, and must not
 // push the frame past the terminal. This is the case that blanked the screen:
 // the window search found nothing that fit and returned an empty slice.
 func TestASingleHugeLineStillRenders(t *testing.T) {
 	m := newCmdModel(&fakeSettings{})
 	m.width, m.height = 80, 12
 	m.addLine(strings.Repeat("line of code\n", 60))
-	if strings.TrimSpace(strings.Join(m.pending, "\n")) == "" {
-		t.Fatal("one very tall line committed nothing")
+	if strings.TrimSpace(strings.Join(m.lines, "\n")) == "" {
+		t.Fatal("one very tall line recorded nothing")
 	}
-	if got := strings.Count(m.View().Content, "\n") + 1; got > 12 {
+	frame := m.View().Content
+	if strings.TrimSpace(frame) == "" {
+		t.Fatal("one very tall line rendered nothing")
+	}
+	if got := strings.Count(strings.TrimRight(frame, "\n"), "\n") + 1; got > 12 {
 		t.Fatalf("frame is %d rows for a 12 row terminal", got)
 	}
 }

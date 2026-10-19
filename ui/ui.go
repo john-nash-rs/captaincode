@@ -5,11 +5,14 @@
 // rendering, no approval dialog, and no conversation steering. Restyling must
 // not silently imply capabilities that do not exist.
 //
-// Finished output is committed to the terminal with tea.Println, so it becomes
-// ordinary scrollback, and the frame holds only the composer. That is what lets
-// the wheel, the scrollbar, text selection, and the terminal's own search reach
-// the whole conversation. A frame that repaints the full screen owns the mouse
-// and takes all four away, which is the arrangement this replaced.
+// The transcript is drawn by the harness in the window above the composer,
+// rather than committed to the terminal to become scrollback. That is what
+// makes reading back possible: the window scrolls with the keys and the wheel,
+// and reaching the top of what it holds pages earlier exchanges out of the
+// store. The trade is the terminal's own scrollback, selection and search,
+// which no longer cover the conversation; the mouse is reported for the whole
+// session so the wheel can drive the scroll. Restyling must not silently imply
+// capabilities that do not exist, and neither must this.
 package ui
 
 import (
@@ -121,6 +124,10 @@ type Info struct {
 	// Models are offered as suggestions when setting a model, so nobody has to
 	// recall an identifier from memory or read it off a web page.
 	Models []string
+	// History serves the earlier exchanges of the conversation as the
+	// transcript is scrolled back. It may be nil, in which case the window
+	// shows what this session produced and scrolling stops at its start.
+	History History
 }
 
 const (
@@ -156,25 +163,38 @@ type model struct {
 	cancel            context.CancelFunc
 	generation        int
 
-	// lines is every line the conversation has shown, oldest first. It is the
-	// record the credential rule is asserted against, and it is what the
-	// committed row count is recomputed from when the terminal is resized.
-	// Nothing in the frame reads it: a line reaches the screen once, when it
-	// is printed.
+	// splash is the banner. It is held apart from the transcript so paging back
+	// through a conversation inserts older exchanges under it rather than above
+	// it, and so the banner stays the first thing in the log.
+	splash []string
+
+	// lines is every line of the transcript, oldest first. It is the record the
+	// credential rule is asserted against, and it is what the window is drawn
+	// from: a line is written once and read for as long as it is on screen.
 	lines []string
-	// pending holds lines committed since the last print. The update loop
-	// drains it through one command, so a line reaches the terminal once and
-	// the order it was produced in is the order it appears in.
-	pending []string
-	// printedRows counts the terminal rows the committed output above the
-	// frame occupies. A click is reported in screen coordinates, so this is
-	// what places the frame under the cursor.
-	printedRows int
+	// revision changes whenever lines or splash change. The wrapped rows are
+	// rebuilt only when it does, so drawing a frame does not re-wrap the whole
+	// conversation on every keystroke.
+	revision         int
+	rendered         []string
+	renderedWidth    int
+	renderedRevision int
+
+	// scroll is how many rows the transcript is scrolled back from its newest
+	// line. Zero follows the end, so an answer appears as it arrives; anything
+	// else holds the operator's place while output continues below.
+	scroll int
+	// turns counts the exchanges the window holds, which is what a page of
+	// older exchanges skips over. more reports whether any remain in the store,
+	// and paging that a request is in flight.
+	turns  int
+	more   bool
+	paging bool
 
 	// Presentation state. None of it affects harness behavior.
 	info          Info
 	theme         theme
-	greeted       bool // the splash has been printed, at the real width
+	greeted       bool // the splash has been laid out, at the real width
 	width, height int
 	phase         string
 	started       time.Time
@@ -267,6 +287,11 @@ func Run(runner Runner, info Info) error {
 		theme:  paint,
 		width:  80,
 		height: 24,
+		// Until a page comes back saying otherwise, there may be earlier
+		// exchanges in the store to show. Starting at false would mean never
+		// asking, and a resumed conversation would open with only the newest
+		// answer on screen.
+		more: true,
 	}
 	program := tea.NewProgram(m)
 	m.send = program.Send
@@ -291,20 +316,18 @@ func Run(runner Runner, info Info) error {
 }
 
 func (m *model) Init() tea.Cmd {
-	return m.startupCheck
+	return tea.Batch(m.startupCheck, m.loadOlder())
 }
 
-// greet prints the splash. It waits for the first size message so the artwork
-// is drawn at the real width, and it prints before anything else so the
-// interface opens with its name rather than with a reply.
+// greet records the splash. It waits for the first size message so the artwork
+// is drawn at the real width, and it is the first thing in the transcript.
 func (m *model) greet() {
 	if m.greeted {
 		return
 	}
 	m.greeted = true
-	for _, line := range splash(m.theme, m.width) {
-		m.addLine(line)
-	}
+	m.splash = splash(m.theme, m.width)
+	m.revision++
 }
 
 // start dispatches the next queued prompt. It is the only place that calls the
@@ -322,6 +345,10 @@ func (m *model) start() tea.Cmd {
 	m.cancel = cancel
 	m.started = time.Now()
 	m.phase = "starting"
+	// Sending a prompt returns to the end of the conversation: the question and
+	// the answer about to arrive are what the operator is looking at, wherever
+	// they had scrolled to before.
+	m.scroll = 0
 	m.addLine(m.theme.user.Render(question))
 	return func() tea.Msg {
 		text, err := m.runner(ctx, question, func(event core.Event) { m.send(progress{generation, event}) })
@@ -330,22 +357,14 @@ func (m *model) start() tea.Cmd {
 	}
 }
 
-// Update runs one message through the interface and then commits whatever the
-// handler produced.
+// Update runs one message through the interface.
 //
-// Committing here rather than at each call site is what makes the transcript
-// append-only: a line is queued by the handler that creates it and printed once,
-// in order, before any command that handler returned. Printing before the run
-// command matters, because the answer is what the run is for.
+// Output is no longer committed to the terminal as it is produced: the
+// transcript is drawn, so every line is simply part of what the next frame
+// renders. Update stays as the seam Bubble Tea is given, and keeps the door
+// open for work that must happen once per message rather than once per frame.
 func (m *model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
-	model, command := m.update(message)
-	if print := m.flush(); print != nil {
-		if command == nil {
-			return model, print
-		}
-		return model, tea.Sequence(print, command)
-	}
-	return model, command
+	return m.update(message)
 }
 
 func (m *model) update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -357,13 +376,17 @@ func (m *model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if item.Height > 0 {
 			m.height = item.Height
 		}
-		// The splash waits for the real width, and this is also the first
-		// moment the interface has a frame to commit output above.
+		// The splash is drawn at the real width, so it waits for the first
+		// size message.
 		m.greet()
-		// A resize reflows the printed lines, so the count of rows above the
-		// frame has to be taken again at the new width or a click lands in the
-		// wrong place.
-		m.printedRows = m.committedRows(m.width)
+		// A resize re-wraps the transcript, so the position is taken again
+		// against the new row count rather than kept as a raw offset, and a
+		// taller window may now reach the start of what is loaded.
+		m.clampScroll()
+		return m, m.wantOlder()
+
+	case historyPage:
+		m.olderPage(item)
 		return m, nil
 
 	case tick:
@@ -441,6 +464,11 @@ func (m *model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.addLine(m.theme.assistant.Render(item.text))
+			// Only a completed run is kept in the store, so only a completed
+			// run counts towards the position a page is asked from. Counting a
+			// failure would skip an exchange that was never written.
+			m.turns++
+			m.addGap()
 		}
 		if m.quitting {
 			return m, tea.Quit
@@ -563,11 +591,44 @@ func (m *model) key(item tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.syncMenu()
 		}
 
-	case "up", "ctrl+p":
-		// The command menu and the model picker own the arrows while they are
-		// open. Everywhere else they have nothing to move: the conversation
-		// lives in the terminal's own scrollback, which the terminal scrolls
-		// itself, and those keys never reach this program.
+	case "up":
+		// The model picker and the command menu own the arrows while they are
+		// open: a list being chosen from is what the operator is looking at.
+		// Otherwise the arrows move the transcript.
+		if m.picking {
+			m.moveModel(-1)
+			return m, nil
+		}
+		if !m.secret && len(m.menu.rows) > 0 {
+			m.moveMenu(-1)
+			return m, nil
+		}
+		return m, m.scrollBy(1)
+
+	case "down":
+		if m.picking {
+			m.moveModel(1)
+			return m, nil
+		}
+		if !m.secret && len(m.menu.rows) > 0 {
+			m.moveMenu(1)
+			return m, nil
+		}
+		return m, m.scrollBy(-1)
+
+	case "pgup":
+		return m, m.scrollBy(m.viewportRows())
+
+	case "pgdown":
+		return m, m.scrollBy(-m.viewportRows())
+
+	case "home":
+		return m, m.scrollTo(m.scrollMax())
+
+	case "end":
+		return m, m.scrollTo(0)
+
+	case "ctrl+p":
 		if m.picking {
 			m.moveModel(-1)
 			return m, nil
@@ -576,7 +637,7 @@ func (m *model) key(item tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.moveMenu(-1)
 		}
 
-	case "down", "ctrl+n":
+	case "ctrl+n":
 		if m.picking {
 			m.moveModel(1)
 			return m, nil
@@ -1200,98 +1261,74 @@ func (m *model) spinner() tea.Cmd {
 	return tea.Tick(90*time.Millisecond, func(time.Time) tea.Msg { return tick(time.Now()) })
 }
 
-// View composes the frame, which is the composer alone.
+// View composes one frame: the transcript window, then the composer.
 //
-// Every line the conversation has produced was committed to the terminal with
-// tea.Println as it was produced, so it lives above the frame in the terminal's
-// own scrollback. The frame therefore holds no transcript and no filler: it is
-// the status line when a run is active, the editor, whatever list is open, the
-// footer and the hint.
+// The transcript is the lines the conversation has produced, wrapped to the
+// width and clipped to the rows above the frame. The frame itself is the status
+// line when a run is active, the editor, whatever list is open, the footer and
+// the hint — and it is drawn at the bottom of every frame, so the prompt never
+// moves and a long answer cannot carry it off screen.
 //
-// The renderer anchors an inline frame directly under the committed output, so
-// on a fresh session the composer sits near the top and moves down as answers
-// arrive, until it reaches the last rows of the terminal and the output begins
-// to scroll. That scroll belongs to the terminal, which is what gives the
-// wheel, the scrollbar, selection and search the whole conversation to work on.
+// A conversation shorter than the window is padded at the top: output collects
+// at the bottom and grows upward, the way a page of text fills from where the
+// writing is. Scroll is the distance back from the newest line, so zero follows
+// the conversation as it grows and anything else holds a place in it.
 func (m *model) View() tea.View {
-	width := m.width
-	if width < 24 {
-		width = 24
-	}
-	height := m.height
-	if height < 6 {
-		height = 6
-	}
+	width, _, viewRows, bottom := m.layout()
+	rows := m.rows()
+	total := len(rows)
+	m.clampScroll()
+	end := total - m.scroll
+	start := end - viewRows
 
-	bottom, blockRows := m.bottomBlock(width, height)
-	view := tea.NewView(bottom)
-
-	// The screen row the frame's first line occupies. Committed rows sit above
-	// it; once they fill the terminal the frame is pinned to the last blockRows
-	// rows and older output scrolls off the top.
-	first := m.printedRows
-	if limit := height - blockRows; first > limit {
-		first = limit
+	// The transcript fills the rows above the frame. A short conversation is
+	// padded at the top rather than at the bottom, so the composer stays where
+	// it is and output grows downward the way a page of text does.
+	//
+	// Every line is padded to the full width. The renderer diffs the frame
+	// against the last one and rewrites only the cells that changed, so a row
+	// that got shorter would leave the tail of the old row on screen — a
+	// scrolled transcript would carry the words that used to be there.
+	var body strings.Builder
+	line := func(text string) {
+		body.WriteString(padTo(text, width))
+		body.WriteByte('\n')
 	}
-	if first < 0 {
-		first = 0
-	}
-	// A click arrives in screen coordinates, so the row of the first choice is
-	// the frame's own offset plus wherever the frame starts.
-	choiceRow := first + m.chooserOffset()
-
-	// Mouse reporting is enabled only while a list is on screen. Asking for
-	// mouse events the whole time would take the wheel, the drag and the
-	// selection away from the terminal for the entire session, in exchange for
-	// a list that is usually not there.
-	switch {
-	case m.picking:
-		view.MouseMode = tea.MouseModeCellMotion
-		view.OnMouse = func(msg tea.MouseMsg) tea.Cmd {
-			click, ok := msg.(tea.MouseClickMsg)
-			if !ok || click.Button != tea.MouseLeft {
-				return nil
-			}
-			index := click.Y - choiceRow
-			if index < 0 {
-				return nil
-			}
-			// The drawn rows are a window onto the filtered list, so the
-			// screen offset has to be added back before indexing.
-			start := 0
-			if m.pick >= maxModelRows {
-				start = m.pick - maxModelRows + 1
-			}
-			target := start + index
-			if target >= len(m.found) {
-				return nil
-			}
-			return func() tea.Msg { return modelPicked{index: target} }
+	for i := 0; i < viewRows; i++ {
+		if index := start + i; index >= 0 && index < total {
+			line(rows[index])
+			continue
 		}
-	case len(m.menu.rows) > 0:
-		view.MouseMode = tea.MouseModeCellMotion
-		view.OnMouse = func(msg tea.MouseMsg) tea.Cmd {
-			click, ok := msg.(tea.MouseClickMsg)
-			if !ok || click.Button != tea.MouseLeft {
-				return nil
-			}
-			index := click.Y - choiceRow
-			if index < 0 || index >= len(m.menu.rows) {
-				return nil
-			}
-			command := m.menu.rows[index]
-			return func() tea.Msg { return picked{command} }
-		}
+		line("")
 	}
+	for _, row := range strings.Split(strings.TrimRight(bottom, "\n"), "\n") {
+		line(row)
+	}
+	view := tea.NewView(body.String())
+
+	// The transcript is painted rather than printed, so the program owns the
+	// window. That is what lets scrolling page back through a conversation,
+	// which a terminal's own scrollback cannot do: it holds no way to ask for
+	// what has scrolled past it.
+	view.AltScreen = true
+
+	// The wheel scrolls the transcript and a click chooses from a list, both of
+	// which need the terminal to report the mouse. Reporting is on for the
+	// whole session rather than only while a list is open, because scrolling is
+	// always available. The terminal's own drag-select is the trade, and most
+	// terminals keep it behind a modifier.
+	view.MouseMode = tea.MouseModeCellMotion
+	view.OnMouse = m.onMouse(viewRows)
 
 	// Position the real terminal cursor inside the editor so native editing and
 	// copy/paste keep working. X tracks the typed text so the bar advances as
 	// the operator writes, and is clamped so it never crosses the border. Y is
-	// the prompt's row inside the frame.
+	// the prompt's row: the transcript occupies the rows above the frame, so
+	// the prompt sits that many rows down plus the frame's own offset.
 	view.Cursor = &tea.Cursor{
 		Position: tea.Position{
 			X: m.cursorColumn(width),
-			Y: offsetOfPrompt(m.running, blockRows) + boxContentRow,
+			Y: viewRows + offsetOfPrompt(m.running, 0) + boxContentRow,
 		},
 		Shape: tea.CursorBar,
 	}
@@ -1507,6 +1544,16 @@ func (m *model) bottomBlock(width, height int) (string, int) {
 	case !m.running:
 		hint = "enter send · ctrl+c quit · /help"
 	}
+	// Scrolled back, the end is what the operator is trying to reach and the
+	// wheel is what they will reach for. Saying so is cheaper than leaving them
+	// to discover that new output is arriving off screen.
+	if m.scroll > 0 {
+		if m.running {
+			hint = "↑↓ or wheel scroll · esc cancel run · end follows"
+		} else {
+			hint = "↑↓ or wheel scroll · end follows · /help"
+		}
+	}
 	if m.notice != "" {
 		hint = m.notice
 	}
@@ -1657,61 +1704,30 @@ func elide(text string, width int) string {
 	return string(runes[:head]) + "…" + string(runes[len(runes)-tail:])
 }
 
-// addLine records a line and queues it to be printed.
+// addLine records a line of the transcript.
 //
-// A line is recorded in full and never trimmed: it is the record the credential
-// rule is asserted against, and it is what the committed-row count is taken
-// from again after a resize. The queue is what reaches the terminal.
+// A line is written once and read for as long as it is in the window. Output
+// arriving while the operator has scrolled back must not pull the view with it:
+// the transcript grows at its end, so the distance from the end grows by the
+// same number of rows and the same text stays on screen.
 func (m *model) addLine(line string) {
 	if line == "" {
 		return
 	}
 	m.lines = append(m.lines, line)
-	m.pending = append(m.pending, line)
+	m.revision++
+	if m.scroll > 0 {
+		m.scroll += m.lineHeight(line)
+	}
 }
 
-// flush turns the queued lines into a single print.
-//
-// One command per drain, with the lines joined, so a whole answer lands
-// together and in the order it was produced. A command per line would leave the
-// renderer free to interleave a repaint between them, which is how a reply
-// arrived on screen with its own lines out of order.
-//
-// Each line is wrapped to the terminal width before it is printed, so the
-// terminal has no wrapping of its own to do. That is what makes printedRows an
-// exact count of the rows the output occupies, which is what places the frame
-// under a click.
-func (m *model) flush() tea.Cmd {
-	if len(m.pending) == 0 || !m.greeted {
-		return nil
+// addGap separates one exchange from the next in the transcript.
+func (m *model) addGap() {
+	m.lines = append(m.lines, "")
+	m.revision++
+	if m.scroll > 0 {
+		m.scroll++
 	}
-	width := m.width
-	if width < 24 {
-		width = 24
-	}
-	rows := make([]string, 0, len(m.pending))
-	for _, line := range m.pending {
-		wrapped := clip(line, width)
-		rows = append(rows, wrapped)
-		m.printedRows += strings.Count(wrapped, "\n") + 1
-	}
-	m.pending = nil
-	return tea.Println(strings.Join(rows, "\n"))
-}
-
-// committedRows is the number of terminal rows the already-printed lines
-// occupy at the given width. A resize reflows what the terminal holds, so the
-// count is taken again from the record rather than scaled.
-func (m *model) committedRows(width int) int {
-	printed := m.lines
-	if n := len(m.pending); n <= len(printed) {
-		printed = printed[:len(printed)-n]
-	}
-	rows := 0
-	for _, line := range printed {
-		rows += strings.Count(clip(line, width), "\n") + 1
-	}
-	return rows
 }
 
 // banner is the one-line greeting. It shortens rather than wrapping, because

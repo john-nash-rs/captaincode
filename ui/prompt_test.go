@@ -71,8 +71,8 @@ func TestSuggestionsAppearForCommandInput(t *testing.T) {
 	if len(rows) == 0 {
 		t.Fatal("no suggestions for a complete command")
 	}
-	// The frame holds the composer, so it must fit the terminal with the list
-	// shown but never grow past it.
+	// The frame holds the transcript and the composer, so it must fit the
+	// terminal with the list shown but never grow past it.
 	frame := strings.Split(strings.TrimRight(m.View().Content, "\n"), "\n")
 	if len(frame) > m.height {
 		t.Errorf("frame has %d rows, want at most %d with suggestions", len(frame), m.height)

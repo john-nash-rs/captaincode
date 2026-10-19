@@ -41,7 +41,7 @@ func Open(path string) (*DB, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var version int
-	if err := database.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || (version != 0 && version != 1) {
+	if err := database.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version > 2 {
 		database.Close()
 		lock.Close()
 		return nil, errors.New("unsupported or unreadable database schema version")
@@ -49,7 +49,8 @@ func Open(path string) (*DB, error) {
 	_, err = database.ExecContext(ctx, `PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, snapshot BLOB NOT NULL, updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, kind TEXT NOT NULL, recorded TEXT NOT NULL);
-PRAGMA user_version=1;`)
+CREATE TABLE IF NOT EXISTS turns(run_id TEXT NOT NULL, ordinal INTEGER NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, recorded TEXT NOT NULL, PRIMARY KEY(run_id, ordinal));
+PRAGMA user_version=2;`)
 	if err != nil {
 		database.Close()
 		lock.Close()

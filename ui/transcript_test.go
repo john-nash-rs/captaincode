@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -27,80 +28,55 @@ func TestTickDoesNotEatTranscript(t *testing.T) {
 	}
 }
 
-// A line is committed exactly once: recorded, queued, and then cleared from the
-// queue when it is printed. Printing it twice would show an answer twice, and
-// printing it never is how output was lost.
-func TestALineIsCommittedOnce(t *testing.T) {
+// A line is recorded once and drawn once.
+//
+// There is no queue between the record and the screen any more: the window
+// reads from the record, so a line cannot be printed twice or dropped between
+// being produced and being shown.
+func TestALineIsRecordedAndDrawnOnce(t *testing.T) {
 	m := newCmdModel(&fakeSettings{})
 	m.greeted = true
 	m.addLine("answer")
 
-	if m.flush() == nil {
-		t.Fatal("a new line was never printed")
-	}
-	if len(m.pending) != 0 {
-		t.Fatalf("%d lines left queued after printing", len(m.pending))
-	}
-	if m.flush() != nil {
-		t.Fatal("an empty queue was printed again")
-	}
 	if len(m.lines) != 1 || m.lines[0] != "answer" {
 		t.Fatalf("record = %q, want one answer", m.lines)
 	}
+	if got := strings.Count(m.View().Content, "answer"); got != 1 {
+		t.Fatalf("the answer is drawn %d times, want 1:\n%s", got, m.View().Content)
+	}
 }
 
-// Nothing is printed before the first size message.
+// Output produced before the first size message is kept.
 //
-// Printing first is what made committed output vanish: the renderer had no
-// frame to insert above yet, so the lines were overwritten as soon as it drew.
-// The splash is what waits for that moment, because it is sized to the width.
-func TestNothingPrintsBeforeTheFirstSize(t *testing.T) {
+// The splash is what waits for the width, because it is sized to the terminal.
+// Nothing else does: a line recorded before the first frame is drawn from the
+// same record as everything else, so there is no window in which it can be
+// overwritten and lost.
+func TestOutputBeforeTheFirstSizeIsKept(t *testing.T) {
 	m := newCmdModel(&fakeSettings{})
 	m.addLine("early output")
-	if cmd := m.flush(); cmd != nil {
-		t.Fatal("printed before the first size message")
-	}
 	m.update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if !m.greeted {
 		t.Fatal("the first size message did not greet")
 	}
-	// The held line is kept, not dropped, and the splash is queued with it.
 	if !strings.Contains(strings.Join(m.lines, "\n"), "early output") {
-		t.Fatal("output queued before the first size message was lost")
+		t.Fatal("output recorded before the first size message was lost")
 	}
-	if got, want := len(m.lines), 1+len(splash(m.theme, m.width)); got != want {
-		t.Fatalf("after the first size message the record has %d lines, want %d", got, want)
+	if len(m.splash) == 0 {
+		t.Fatal("the splash was never laid out")
 	}
-}
-
-// The committed row count is what places the frame under a click, so a wrapped
-// line has to count as the rows it actually occupies.
-func TestCommittedRowsCountWrapping(t *testing.T) {
-	m := newCmdModel(&fakeSettings{})
-	m.greeted = true
-	m.width = 24
-	m.addLine("1234567890") // fits
-	if m.flush() == nil {
-		t.Fatal("nothing printed")
-	}
-	if m.printedRows != 1 {
-		t.Fatalf("a fitting line counted as %d rows, want 1", m.printedRows)
-	}
-	m.addLine(strings.Repeat("x", 60)) // wraps to three rows at width 24
-	m.flush()
-	if m.printedRows != 4 {
-		t.Fatalf("printedRows = %d, want 4", m.printedRows)
+	if !strings.Contains(m.View().Content, "early output") {
+		t.Fatalf("the kept output is not on screen:\n%s", m.View().Content)
 	}
 }
 
-// A click is reported in screen coordinates while the frame floats under the
-// committed output, so the handler has to offset by where the frame starts. A
-// click one row too high belongs to the output, not to the menu.
+// A click is reported in screen coordinates and the frame is drawn directly
+// under the transcript, so a click's row is the screen row. The frame starts
+// where the transcript ends, and a choice starts at its own offset inside it.
 func TestClickRunsTheCommandUnderTheCursor(t *testing.T) {
 	m := newCmdModel(&fakeSettings{})
 	m.width, m.height = 80, 24
 	m.greeted = true
-	m.printedRows = 3 // the splash, as if it had already been printed
 	typeText(m, "/")
 
 	view := m.View()
@@ -120,7 +96,7 @@ func TestClickRunsTheCommandUnderTheCursor(t *testing.T) {
 	}
 
 	command := m.menu.rows[0]
-	cmd := view.OnMouse(tea.MouseClickMsg{Button: tea.MouseLeft, Y: m.printedRows + index})
+	cmd := view.OnMouse(tea.MouseClickMsg{Button: tea.MouseLeft, Y: index})
 	if cmd == nil {
 		t.Fatalf("a click on %q did nothing", command)
 	}
@@ -129,14 +105,43 @@ func TestClickRunsTheCommandUnderTheCursor(t *testing.T) {
 		t.Fatalf("the click produced %#v, want %q", cmd(), command)
 	}
 
-	// One row higher is still inside the editor, so it must select nothing.
-	if cmd := view.OnMouse(tea.MouseClickMsg{Button: tea.MouseLeft, Y: m.printedRows + index - 1}); cmd != nil {
+	// One row higher is the editor, so it must select nothing.
+	if cmd := view.OnMouse(tea.MouseClickMsg{Button: tea.MouseLeft, Y: index - 1}); cmd != nil {
 		t.Fatal("a click above the first suggestion selected something")
 	}
 }
 
-// A run that fails must print the remedy beneath the error, and name the
-// command that applies.
+// A wheel notch moves the transcript, and moving it back returns to the end.
+func TestWheelScrollsTheTranscript(t *testing.T) {
+	m := tallTranscript(60)
+	view := m.View()
+
+	view.OnMouse(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.scroll != wheelRows {
+		t.Fatalf("scroll after one notch up = %d, want %d", m.scroll, wheelRows)
+	}
+	view.OnMouse(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if m.scroll != 0 {
+		t.Fatalf("scroll after one notch down = %d, want 0", m.scroll)
+	}
+}
+
+// The arrows move the transcript when no list is open, because the transcript
+// is the only thing on screen that scrolls.
+func TestArrowKeysScrollTheTranscript(t *testing.T) {
+	m := tallTranscript(60)
+	m.key(tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.scroll != 1 {
+		t.Fatalf("up left the transcript at %d, want 1", m.scroll)
+	}
+	m.key(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.scroll != 0 {
+		t.Fatalf("down left the transcript at %d, want 0", m.scroll)
+	}
+}
+
+// A run that fails must show the remedy beneath the error, and name the command
+// that applies.
 func TestRunFailureRendersAdvice(t *testing.T) {
 	m := newCmdModel(&fakeSettings{})
 	m.Update(finished{
@@ -164,6 +169,18 @@ func TestRunFailureWithoutAdviceShowsOnlyTheError(t *testing.T) {
 	if strings.Contains(text, "run /models") {
 		t.Errorf("an advice-free failure invented a remedy:\n%s", text)
 	}
+}
+
+// tallTranscript is a model with more lines than fit a 20-row terminal, so it
+// has somewhere to scroll to.
+func tallTranscript(lines int) *model {
+	m := newCmdModel(&fakeSettings{})
+	m.width, m.height = 80, 20
+	m.greeted = true
+	for i := 0; i < lines; i++ {
+		m.addLine(fmt.Sprintf("line %02d", i))
+	}
+	return m
 }
 
 type errWithAdvice struct{}

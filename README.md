@@ -10,9 +10,9 @@ an action.** Every guarantee CaptainCode makes — bounded execution, recorded
 observations, recoverable runs, visible permissions — follows from keeping that
 distinction explicit.
 
-> **Status: 0.2.0 (unreleased on `main`).** A single-operator tool, not a hosted service. It is
-> designed to be read, run, and audited. It is not hardened for
-> multi-tenancy or adversarial use. See [Limitations](#limitations).
+> **Status: 0.3.3.** A single-operator tool, not a hosted service. It is designed
+> to be read, run, and audited. It is not hardened for multi-tenancy or
+> adversarial use. See [Limitations](#limitations).
 
 ![CaptainCode terminal interface](docs/tui.svg)
 
@@ -83,7 +83,7 @@ the archive for your platform, verifies its SHA-256 against the release's
 are required.
 
 ```sh
-sh install.sh --version v0.1.0        # pin a specific version
+sh install.sh --version v0.3.3        # pin a specific version
 sh install.sh --dir ~/bin            # choose the install directory
 sh install.sh --help
 ```
@@ -104,16 +104,31 @@ Grab the archive and `checksums.txt` from
 [GitHub Releases](https://github.com/john-nash-rs/captaincode/releases):
 
 ```sh
-VERSION=v0.1.0
-curl -fsSLO "https://github.com/john-nash-rs/captaincode/releases/download/$VERSION/captaincode_${VERSION#v}_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+VERSION=v0.3.3
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+ARCHIVE="captaincode_${VERSION#v}_${OS}_${ARCH}.tar.gz"
+
+curl -fsSLO "https://github.com/john-nash-rs/captaincode/releases/download/$VERSION/$ARCHIVE"
 curl -fsSLO "https://github.com/john-nash-rs/captaincode/releases/download/$VERSION/checksums.txt"
-shasum -a 256 -c checksums.txt
-tar -xzf captaincode_*.tar.gz
-sudo mv captaincode /usr/local/bin/   # or ~/.local/bin, no sudo needed
+
+# checksums.txt lists all four platforms, so verify only the line for the
+# archive you downloaded. `shasum -c checksums.txt` on its own reports the
+# other three as missing and warns, even when your download is correct.
+grep " $ARCHIVE\$" checksums.txt | shasum -a 256 -c
+
+tar -xzf "$ARCHIVE"
+install -m 0755 captaincode ~/.local/bin/captaincode
 ```
 
 **Verify the checksum before running anything.** A mismatch means the download
-is corrupt or was tampered with.
+is corrupt or was tampered with. The verification above prints
+`captaincode_….tar.gz: OK` and exits `0`; a mismatch prints `FAILED` and exits
+non-zero.
+
+Note there is no `sudo` above. `install` writes to `~/.local/bin`, which is yours
+already. If that directory is not on your `PATH`, see
+[PATH troubleshooting](#path-troubleshooting).
 
 ### Supported platforms
 
@@ -166,13 +181,24 @@ brew uninstall captaincode                        # Homebrew
 rm ~/.local/bin/captaincode                       # shell installer
 ```
 
-Optional state also lives outside the binary and is **not** removed by
-uninstalling:
+Your settings and your stored credential live outside the binary and are **not**
+removed by uninstalling. To find where they actually are on your machine:
 
 ```sh
-rm ~/.config/captaincode/sessions.db     # session database
-rm ~/.config/captaincode/openrouter.key  # stored credential
+captaincode doctor
 ```
+
+It prints the paths in force. To remove them by hand:
+
+| What | Where |
+|---|---|
+| Settings | `~/.captaincode.json` |
+| Credential | `<user-config-dir>/captaincode/openrouter.key` |
+| Run databases | `<user-config-dir>/captaincode/*.db` |
+
+`<user-config-dir>` is `~/.config` on Linux and
+`~/Library/Application Support` on macOS. `captaincode doctor` prints the
+resolved path rather than making you work out which one applies.
 
 Remove the credential file if you are uninstalling for security reasons.
 
@@ -267,6 +293,11 @@ The project version is 2.5.0 (package.json).
 Run: 526e845c47c9161ecafe395fe6776714
 ```
 
+That output is the **offline fixture**, shown because a machine with no
+credential and no model set up gets one. Once you have run `/connect`, the same
+command answers from your model instead. See [Which provider
+runs](#which-provider-runs).
+
 Run in another project:
 
 ```sh
@@ -284,12 +315,38 @@ Flags may appear before or after the directory. `--tui` was removed in 0.2.0;
 the interface is the default and `--ide=false` selects the previous one-shot
 behaviour.
 
+### Which provider runs
+
+You do not need `--provider`. It is resolved from your configuration:
+
+| You have | Runs |
+|---|---|
+| A model **and** a credential | OpenRouter — your configured model |
+| Neither | An offline fixture that needs no key or network |
+
+Either one alone counts as unconfigured, because a half setup cannot work.
+
+This matters because the failure is silent. The offline provider starts
+normally, accepts a prompt and answers — from a fixed script. Nothing errors, so
+nothing tells you the provider you configured was not in force. The footer names
+whichever provider is actually running, so if it says `fixture`, you are on the
+offline one.
+
+Force one either way with `--provider`:
+
+```sh
+captaincode ./myproject --provider fixture     # offline, ignores your key
+captaincode ./myproject --provider openrouter  # hosted, even if half configured
+```
+
 ### Database location
 
 Each workspace gets its own database under the user config directory, named
 `<directory>-<hash>.db`. Two projects therefore never collide, and the same
 project always maps to the same file so `--resume` works without repeating
 `--db`.
+
+`captaincode doctor` prints the path in force.
 
 Override it when you want the database somewhere specific:
 
@@ -325,12 +382,16 @@ suggestion.
 | `/status` | Show what is configured and check that it works |
 | `/models` | Pick a model from a list of the ones your account can use |
 | `/permissions` | Show or change what may be edited or run |
+| `/tools` | List the tools available and whether each is granted |
+| `/help` | List every command |
 | `/openrouter` | Report provider, model, credential, and keyfile path |
 | `/openrouter api-key` | Store a credential — paste or type; nothing is echoed |
 | `/openrouter model` | Open the model picker |
 | `/openrouter model <id>` | Set a model by identifier |
 | `/openrouter clear-key` | Remove the stored credential |
 | `/openrouter path` | Print the keyfile path |
+
+`/perm` and `/config` are accepted as aliases of `/permissions` and `/openrouter`.
 
 Type `/` and the list appears. **↑** and **↓** — or a click — move the highlight,
 **enter** runs it, **tab** completes. Copy and paste work throughout.
@@ -447,12 +508,9 @@ charges**, and selected project content leaves your machine.
 
 There is one settings file: `~/.captaincode.json`.
 
-```sh
-captaincode /connect
-```
-
-writes it for you. Most people never need to open it. Use `--config <path>` to
-read a different file for one run — that is how you keep per-project settings:
+`/connect` writes it for you — run `captaincode` to get the interface, then type
+`/connect`. Most people never need to open it. Use `--config <path>` to read a
+different file for one run — that is how you keep per-project settings:
 
 ```sh
 captaincode --config ./deploy.json .
@@ -508,10 +566,12 @@ conventions. No interpreter is required at runtime.
 | `make_directory` | writes | Create a directory and parents |
 | `move_path` | writes | Rename or move |
 | `delete_path` | writes | Delete a file or an *empty* directory |
+| `run_command` | commands | Run a program, bounded by a timeout |
 
 A non-empty directory is refused rather than emptied. Removing the workspace
 root is refused outright. Every path is checked against the workspace before
-any syscall, so `..` and absolute paths cannot escape.
+any syscall, so `..` and absolute paths cannot escape. `/tools` lists these with
+the grant each one currently needs.
 
 Enabling writes or commands is a **coarse project-wide grant, not a per-call
 approval.** There is no interactive approval prompt. Use a disposable copy of
@@ -663,8 +723,8 @@ revoked, or expired. `403` means it is valid but lacks write access.
 **2. Tag and push.**
 
 ```sh
-git tag -a v0.2.0 -m "v0.2.0"
-git push origin v0.2.0
+git tag -a v0.4.0 -m "CaptainCode 0.4.0"
+git push origin v0.4.0
 ```
 
 The workflow runs tests, validates the GoReleaser config, builds all four
@@ -695,8 +755,8 @@ So re-running the workflow is not a way to repair a broken cask. To re-release
 the same version, delete the assets or the release first:
 
 ```sh
-gh release delete v0.2.0 --repo john-nash-rs/captaincode --yes
-git push origin :refs/tags/v0.2.0
+gh release delete v0.4.0 --repo john-nash-rs/captaincode --yes
+git push origin :refs/tags/v0.4.0
 ```
 
 That leaves a window with no binaries, so prefer a new version number.

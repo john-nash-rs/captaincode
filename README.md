@@ -13,7 +13,7 @@ explicit tool contract, a bounded agent loop, OS-enforced sandboxing, and durabl
 run state — so that what the system did is a matter of record rather than of
 trust.
 
-> **Status: 0.3.3.** A single-operator tool, not a hosted service. It is designed
+> **Status: 0.4.0.** A single-operator tool, not a hosted service. It is designed
 > to be read, run, and audited. It is not hardened for multi-tenancy or
 > adversarial use. See [Limitations](#limitations).
 
@@ -121,7 +121,7 @@ the archive for your platform, verifies its SHA-256 against the release's
 are required.
 
 ```sh
-sh install.sh --version v0.3.3        # pin a specific version
+sh install.sh --version v0.4.0        # pin a specific version
 sh install.sh --dir ~/bin            # choose the install directory
 sh install.sh --help
 ```
@@ -145,7 +145,7 @@ Grab the archive and `checksums.txt` from
 [GitHub Releases](https://github.com/john-nash-rs/captaincode/releases):
 
 ```sh
-VERSION=v0.3.3
+VERSION=v0.4.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 ARCHIVE="captaincode_${VERSION#v}_${OS}_${ARCH}.tar.gz"

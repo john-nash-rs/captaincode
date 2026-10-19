@@ -71,10 +71,11 @@ func TestSuggestionsAppearForCommandInput(t *testing.T) {
 	if len(rows) == 0 {
 		t.Fatal("no suggestions for a complete command")
 	}
-	// The frame must still be exactly terminal height with suggestions shown.
+	// The frame holds the composer, so it must fit the terminal with the list
+	// shown but never grow past it.
 	frame := strings.Split(strings.TrimRight(m.View().Content, "\n"), "\n")
-	if len(frame) != m.height {
-		t.Errorf("frame has %d rows, want %d with suggestions", len(frame), m.height)
+	if len(frame) > m.height {
+		t.Errorf("frame has %d rows, want at most %d with suggestions", len(frame), m.height)
 	}
 	for i, r := range frame {
 		if lipgloss.Width(r) > m.width {
@@ -91,8 +92,8 @@ func TestNoSuggestionsForOrdinaryPrompts(t *testing.T) {
 		t.Errorf("ordinary prompt showed %d suggestions", len(rows))
 	}
 	frame := strings.Split(strings.TrimRight(m.View().Content, "\n"), "\n")
-	if len(frame) != m.height {
-		t.Errorf("frame has %d rows, want %d", len(frame), m.height)
+	if len(frame) > m.height {
+		t.Errorf("frame has %d rows, want at most %d", len(frame), m.height)
 	}
 }
 
@@ -153,8 +154,11 @@ func TestCursorRowTracksLayout(t *testing.T) {
 		typeText(m, "/openr")
 		v := m.View()
 		rows := strings.Split(strings.TrimRight(v.Content, "\n"), "\n")
-		if len(rows) != 30 {
+		if len(rows) > 30 {
 			t.Fatalf("running=%v frame has %d rows", running, len(rows))
+		}
+		if v.Cursor.Y < 0 || v.Cursor.Y >= len(rows) {
+			t.Fatalf("running=%v cursor row %d outside a %d row frame", running, v.Cursor.Y, len(rows))
 		}
 		row := rows[v.Cursor.Y]
 		if !strings.Contains(row, "›") {
@@ -174,7 +178,7 @@ func TestSuggestionsDropOnShortTerminal(t *testing.T) {
 		m.lines = []string{banner(theme{}, 60)}
 		typeText(m, "/openr")
 		rows := strings.Split(strings.TrimRight(m.View().Content, "\n"), "\n")
-		if len(rows) != h {
+		if len(rows) > h {
 			t.Errorf("h=%d frame has %d rows", h, len(rows))
 		}
 		v := m.View()

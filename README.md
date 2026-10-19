@@ -511,13 +511,16 @@ promoted ahead of what actually works.
 
 ### Reading back
 
-**↑** and **↓** scroll the transcript, **PgUp**/**PgDn** move a screenful,
-**Home**/**End** jump to the ends, and the mouse wheel works. New output returns
-the view to the live end. While scrolled back the status line says so, because
-a spinner describing a run that has left the screen is worse than none.
+The conversation is written to the terminal as it happens, so the terminal's own
+scrollback holds all of it. The wheel, the scrollbar, the mouse drag, and the
+terminal's search all work over the whole session, exactly as they do for
+`git log` or a compiler. Output fills the screen from the top and older answers
+scroll away above the prompt as new ones arrive.
 
-The arrows belong to the command menu and the model picker while those are
-open, so a model can still be chosen.
+Nothing is captured while you are reading: the interface asks for mouse reporting
+only while the command menu or the model picker is on screen, and releases it the
+moment that closes. The arrows belong to whichever list is open, so a model can
+still be chosen; there is no in-frame scrolling to compete with the terminal's.
 
 Credentials resolve per request, so rotating a key or changing a model takes
 effect immediately.

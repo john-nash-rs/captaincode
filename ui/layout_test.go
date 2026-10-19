@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 // A short answer rendered while a code request left the screen blank. Two
@@ -29,41 +27,28 @@ func longReplyModel(height int) *model {
 	return m
 }
 
-func visibleText(frame string) string {
-	var b strings.Builder
-	for _, line := range strings.Split(frame, "\n") {
-		if strings.TrimSpace(line) != "" {
-			b.WriteString(line)
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
-}
-
-// The report: a code request produced an empty screen.
+// The report: a code request produced an empty screen. Output no longer lives
+// in the frame, so the assertion moves to what is committed for printing: the
+// answer must be in the queue in full, whatever the terminal height.
 func TestLongReplyIsNotBlank(t *testing.T) {
 	for _, height := range []int{10, 16, 24, 40, 80} {
 		m := longReplyModel(height)
-		text := visibleText(m.View().Content)
-		if strings.TrimSpace(text) == "" {
-			t.Fatalf("height %d rendered a blank transcript", height)
+		committed := strings.Join(m.pending, "\n")
+		if strings.TrimSpace(committed) == "" {
+			t.Fatalf("height %d committed nothing", height)
 		}
-		// Which words survive depends on the height, because trimming keeps
-		// the newest rows. Asserting on content only makes sense once the
-		// whole answer fits, so that is the only case checked here.
-		if height >= 40 {
-			if !strings.Contains(text, "calculator") {
-				t.Errorf("height %d dropped the question:\n%s", height, text)
-			}
-			if !strings.Contains(text, "def add") {
-				t.Errorf("height %d dropped the start of the answer:\n%s", height, text)
-			}
+		if !strings.Contains(committed, "def add") {
+			t.Errorf("height %d dropped the start of the answer:\n%s", height, committed)
+		}
+		if !strings.Contains(committed, "calculator") {
+			t.Errorf("height %d dropped the question:\n%s", height, committed)
 		}
 	}
 }
 
-// A reply taller than the window must not push the prompt off the bottom. The
-// frame is exactly the terminal height, with the editor on the last rows.
+// The frame holds only the composer, so it must never be taller than the
+// terminal: the renderer discards the top rows of an oversized frame, which
+// would take the editor with it.
 func TestFrameNeverOverflowsTheTerminal(t *testing.T) {
 	for _, height := range []int{8, 12, 24, 40, 80} {
 		m := longReplyModel(height)
@@ -71,65 +56,31 @@ func TestFrameNeverOverflowsTheTerminal(t *testing.T) {
 		if got := strings.Count(frame, "\n") + 1; got > height {
 			t.Errorf("height %d produced a frame of %d rows", height, got)
 		}
-		if !strings.Contains(frame, "ask about this project") && !strings.Contains(frame, "›") {
+		if !strings.Contains(frame, "›") {
 			t.Errorf("height %d lost the prompt:\n%s", height, frame)
 		}
 	}
 }
 
-// The newest content is what is being read, so trimming keeps the end.
-func TestTrimmingKeepsTheNewestRows(t *testing.T) {
-	trimmed := clipRows("a\nb\nc\nd\ne", 80, 2)
-	if trimmed != "d\ne" {
-		t.Fatalf("clipRows kept %q, want the last two rows", trimmed)
-	}
-	// A budget of zero yields nothing rather than panicking on a slice.
-	if got := clipRows("a\nb", 80, 0); got != "" {
-		t.Fatalf("clipRows with no budget returned %q", got)
-	}
-	// Text that already fits is untouched.
-	if got := clipRows("a\nb", 80, 5); got != "a\nb" {
-		t.Fatalf("clipRows altered text that fits: %q", got)
-	}
-}
-
-// A single line taller than the window must still produce something. This is
-// the case that blanked the screen: the window search found nothing that fit
-// and returned an empty slice.
+// A single line taller than the terminal must still be committed, and must not
+// push the frame past the terminal. This is the case that blanked the screen:
+// the window search found nothing that fit and returned an empty slice.
 func TestASingleHugeLineStillRenders(t *testing.T) {
 	m := newCmdModel(&fakeSettings{})
 	m.width, m.height = 80, 12
 	m.addLine(strings.Repeat("line of code\n", 60))
-	if strings.TrimSpace(visibleText(m.View().Content)) == "" {
-		t.Fatal("one very tall line rendered blank")
+	if strings.TrimSpace(strings.Join(m.pending, "\n")) == "" {
+		t.Fatal("one very tall line committed nothing")
 	}
 	if got := strings.Count(m.View().Content, "\n") + 1; got > 12 {
 		t.Fatalf("frame is %d rows for a 12 row terminal", got)
 	}
 }
 
-// Scrolling back through a long reply must show the older part of it, not
-// repeat the newest rows.
-func TestScrollingRevealsTheStartOfALongReply(t *testing.T) {
-	m := longReplyModel(24)
-	bottom := visibleText(m.View().Content)
-	if strings.Contains(bottom, "def add") {
-		t.Skip("the whole answer already fits; nothing to scroll")
-	}
-	for range 12 {
-		m.key(tea.KeyPressMsg{Code: tea.KeyUp})
-	}
-	top := visibleText(m.View().Content)
-	if top == bottom {
-		t.Fatal("scrolling did not change the transcript")
-	}
-}
-
 // A tiny terminal must still produce a usable frame rather than an empty one.
 func TestTinyTerminalStillRenders(t *testing.T) {
 	m := longReplyModel(6)
-	frame := m.View().Content
-	if strings.TrimSpace(frame) == "" {
+	if strings.TrimSpace(m.View().Content) == "" {
 		t.Fatal("a six row terminal rendered nothing")
 	}
 }

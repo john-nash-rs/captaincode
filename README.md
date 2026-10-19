@@ -30,7 +30,7 @@ patch still causes damage when the harness cannot answer four questions:
 
 ## Design
 
-Seven packages, each owning one responsibility:
+Eight packages, each owning one responsibility:
 
 | Package | Responsibility |
 |---|---|
@@ -40,6 +40,7 @@ Seven packages, each owning one responsibility:
 | `storage` | SQLite snapshots and an event index with atomic commit |
 | `provider` | OpenRouter adapter with an offline deterministic fixture |
 | `keyring` | Credential resolution and private storage |
+| `config` | Settings resolution and validation |
 | `ui` | Bubble Tea terminal interface |
 
 Two principles run through all of them:

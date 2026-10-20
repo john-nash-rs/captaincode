@@ -42,9 +42,10 @@ func TestWindowsACLDiagnosis(t *testing.T) {
 		cancel()
 		t.Logf("%s err=%v output:\n%s", name, err, output)
 	}
-	readOnly := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 4096}}
+	readOnlyRoot := t.TempDir()
+	readOnly := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: readOnlyRoot, MaxBytes: 4096}}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	command, err := readOnly.Command(ctx, []string{"/c", "icacls " + root})
+	command, err := readOnly.Command(ctx, []string{"/c", "icacls " + readOnlyRoot})
 	if err == nil {
 		output, runErr := command.CombinedOutput()
 		t.Logf("read-only-root-acl err=%v output:\n%s", runErr, output)

@@ -46,6 +46,10 @@ import (
 // second user gets a different SID from the same code.
 const appContainerName = "CaptainCode.ToolWorker"
 
+// fileAllAccessMask is FILE_ALL_ACCESS from winnt.h, expanded to file-specific
+// rights so SetEntriesInAcl does not store an unmapped GENERIC_ALL ACE.
+const fileAllAccessMask = windows.ACCESS_MASK(0x001f01ff)
+
 // hresultAlreadyExists is returned by CreateAppContainerProfile when the
 // profile is already there, which is the ordinary case after the first run.
 const hresultAlreadyExists = 0x800700b7
@@ -230,9 +234,7 @@ var secretNames = []string{".git", ".env", ".ssh", ".aws", ".codex"}
 // the paths it actually denied.
 func denyContainerRead(root string, sid *appContainerIdentity) ([]string, error) {
 	subjects := denySubjects(sid)
-	// GENERIC_ALL is retained as a generic ACE here because Windows expands it
-	// to the complete file and directory rights set during access checks.
-	mask := windows.ACCESS_MASK(windows.GENERIC_ALL)
+	mask := fileAllAccessMask
 	var denied []string
 	for _, name := range secretNames {
 		path := filepath.Join(root, name)

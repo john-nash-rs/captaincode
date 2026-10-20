@@ -4,6 +4,7 @@ package keyring
 
 import (
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -30,22 +31,17 @@ func TestKeyFileACLGivesOnlyTheCurrentUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, _, err := descriptor.Owner()
-	if err != nil {
-		t.Fatal(err)
-	}
 	user, err := currentUser()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !windows.EqualSid(owner, user) {
-		t.Fatal("the key file is not owned by the current user")
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Two entries and no more: this user and SYSTEM. A third is another
-	// account with a claim on the credential, which is what Store exists to
-	// prevent and what os.Chmod, which only sets the read-only attribute,
-	// never could.
+	// Windows may assign the token's primary group as the file owner. The
+	// protected DACL is the security boundary, so assert its exact trustees.
 	dacl, _, err := descriptor.DACL()
 	if err != nil {
 		t.Fatal(err)
@@ -56,5 +52,18 @@ func TestKeyFileACLGivesOnlyTheCurrentUser(t *testing.T) {
 	}
 	if entries != 2 {
 		t.Fatalf("the key file has %d ACL entries, want 2", entries)
+	}
+	for i := uint16(0); i < entries; i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, uint32(i), &ace); err != nil {
+			t.Fatal(err)
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			t.Fatalf("ACL entry %d has type %d, want allowed", i, ace.Header.AceType)
+		}
+		trustee := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if !windows.EqualSid(trustee, user) && !windows.EqualSid(trustee, system) {
+			t.Fatalf("ACL entry %d grants access to unexpected SID %s", i, trustee.String())
+		}
 	}
 }

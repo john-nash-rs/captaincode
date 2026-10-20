@@ -196,7 +196,13 @@ func windowsACLForTest(t *testing.T, path string) string {
 	if err != nil {
 		return string(output) + "\nicacls error: " + err.Error()
 	}
-	return string(output)
+	quotedPath := strings.ReplaceAll(path, "'", "''")
+	command := "$acl = Get-Acl -LiteralPath '" + quotedPath + "'; $acl.Sddl"
+	sddl, sddlErr := exec.Command("powershell.exe", "-NoProfile", "-Command", command).CombinedOutput()
+	if sddlErr != nil {
+		return string(output) + "\nSDDL error: " + sddlErr.Error() + "\n" + string(sddl)
+	}
+	return string(output) + "\nSDDL: " + strings.TrimSpace(string(sddl))
 }
 
 // A read-only worker must not be able to write, and the workspace it was

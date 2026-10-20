@@ -3,17 +3,40 @@ package keyring
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/john-nash-rs/captaincode/internal/testenv"
 )
 
 func isolate(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	testenv.SetConfigHome(t, home)
 	t.Setenv(EnvVar, "")
 	return home
+}
+
+// hasMode reports whether a path has the mode the test asked for.
+//
+// On Windows os.Stat synthesizes 0666 for a normal file and 0755 for a normal
+// directory: the mode returned there is a compatibility view built from the
+// read-only attribute and carries no permission meaning at all. Asserting 0600
+// would therefore be testing a fiction on that platform, so the real check is
+// the ACL, which TestKeyFileACLGivesOnlyTheCurrentUser owns.
+func hasMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != want {
+		t.Errorf("mode of %s = %o, want %o", path, perm, want)
+	}
 }
 
 func TestStoreCreatesPrivateFile(t *testing.T) {
@@ -28,20 +51,8 @@ func TestStoreCreatesPrivateFile(t *testing.T) {
 	if !strings.HasPrefix(path, home) {
 		t.Fatalf("keyfile %q is outside the home directory %q", path, home)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("keyfile mode = %o, want 600", perm)
-	}
-	dir, err := os.Stat(filepath.Dir(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := dir.Mode().Perm(); perm != 0o700 {
-		t.Errorf("keyfile directory mode = %o, want 700", perm)
-	}
+	hasMode(t, path, 0o600)
+	hasMode(t, filepath.Dir(path), 0o700)
 }
 
 func TestRoundTrip(t *testing.T) {

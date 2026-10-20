@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"unicode"
 )
@@ -75,9 +76,19 @@ func isTerminal(f *os.File) bool {
 // the operator is told what to fix instead of being shown a bare errno.
 func errPermission(path string, err error) error {
 	if errors.Is(err, os.ErrPermission) {
-		return fmt.Errorf("cannot write %s\n  fix: sudo chown -R $USER %s", path, path)
+		return fmt.Errorf("cannot write %s\n  fix: %s", path, permissionFix(path))
 	}
 	return fmt.Errorf("cannot write %s: %w", path, err)
+}
+
+// permissionFix is the command that repairs a permission failure on this
+// platform. A fix line the operator cannot follow is worse than none: chown
+// does not exist on Windows, and takeown does not exist on a Mac.
+func permissionFix(path string) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("takeown /f %s  then  icacls %s /grant %%USERNAME%%:F", path, path)
+	}
+	return fmt.Sprintf("sudo chown -R $USER %s", path)
 }
 
 // valueFlags are the flags that consume the following argument. Boolean flags

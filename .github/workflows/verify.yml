@@ -6,8 +6,11 @@ jobs:
   test:
     strategy:
       fail-fast: false
+      # windows-2022 is here for the platform, not only for the build. Every
+      # assumption about paths, environment variables and file permissions
+      # that is wrong on Windows passes on the other two and is caught here.
       matrix:
-        os: [ubuntu-22.04, macos-14]
+        os: [ubuntu-22.04, macos-14, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -20,14 +23,41 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y bubblewrap curl
       - run: go mod verify
       - run: go vet ./...
-      - run: go test -race -count=1 ./...
+      - name: Test
+        # The race detector links against a C toolchain that the Windows runner
+        # does not reliably provide. The tests still run there, without the
+        # detector: three platforms passing is worth more than two passing with
+        # the stronger check and one not running at all.
+        shell: bash
+        run: |
+          set -eu
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go test -count=1 ./...
+          else
+            go test -race -count=1 ./...
+          fi
         env:
           CAPTAINCODE_SANDBOX_TEST: '1'
-      - run: go build -o bin/captaincode ./cmd/captaincode
+      - name: Build
+        # go build -o keeps the name it is given, and a Windows executable
+        # without a .exe suffix cannot be started, so the suffix is not
+        # decoration. $BIN carries the result to the steps below.
+        shell: bash
+        run: |
+          set -eu
+          suffix=""
+          if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
+          echo "BIN=bin/captaincode$suffix" >> "$GITHUB_ENV"
+          go build -o "bin/captaincode$suffix" ./cmd/captaincode
       - name: Offline CLI smoke
         # --ide=false because the interface is now the default and needs a
         # terminal, which a runner does not provide.
-        run: ./bin/captaincode ./testdata/project --ide=false --db "$RUNNER_TEMP/captaincode-smoke.db"
+        shell: bash
+        run: |
+          set -eu
+          export HOME="$RUNNER_TEMP/smoke-home"
+          mkdir -p "$HOME"
+          "./$BIN" ./testdata/project --ide=false --db "$RUNNER_TEMP/captaincode-smoke.db"
       - name: Release gate
         # Runs the whole user journey against the binary that was just built,
         # not against the test tree. A release is judged on the artifact, so
@@ -36,5 +66,5 @@ jobs:
         # The journey is offline by design, so this needs no credential and
         # cannot pass by accident on a developer's machine.
         env:
-          CAPTAINCODE_TEST_BINARY: ${{ github.workspace }}/bin/captaincode
+          CAPTAINCODE_TEST_BINARY: ${{ github.workspace }}/${{ env.BIN }}
         run: go test -count=1 -v ./evals/ -run 'Journey'

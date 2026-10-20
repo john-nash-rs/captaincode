@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/john-nash-rs/captaincode/internal/testenv"
 )
 
 func TestRejectUnknownAndInvalidConfiguration(t *testing.T) {
@@ -16,13 +18,13 @@ func TestRejectUnknownAndInvalidConfiguration(t *testing.T) {
 	}
 }
 
-// isolate points HOME at a scratch directory so these tests never read or write
-// the configuration of whoever is running them.
+// isolate points the config file and the config directory at a scratch
+// directory so these tests never read or write the configuration of whoever is
+// running them, on any platform.
 func isolate(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	testenv.SetConfigHome(t, home)
 	t.Setenv("CAPTAINCODE_CONFIG", "")
 	return home
 }

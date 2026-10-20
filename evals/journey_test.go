@@ -4,8 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/john-nash-rs/captaincode/internal/testenv"
+	"github.com/john-nash-rs/captaincode/keyring"
 )
 
 // THE JOURNEY, OFFLINE, AGAINST THE REAL BINARY.
@@ -27,15 +31,29 @@ const journeyProvider = "fixture"
 
 // journeyEnv is an environment with nothing inherited. A run that can see the
 // developer's own settings is not a first run.
+//
+// testenv.ConfigEnv carries the per-platform home and config directory, so the
+// child looks where the binary actually looks. Naming HOME and
+// XDG_CONFIG_HOME directly is right on Unix and silent on Windows, where the
+// binary reads USERPROFILE and APPDATA and would therefore have read the real
+// profile of whoever ran the journey.
 func journeyEnv(home string) []string {
-	return []string{
-		"HOME=" + home,
-		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+	return append(testenv.ConfigEnv(home),
 		"OPENROUTER_API_KEY=",
 		"CAPTAINCODE_CONFIG=",
-		"PATH=" + os.Getenv("PATH"),
+		"PATH="+os.Getenv("PATH"),
 		"LANG=C",
+	)
+}
+
+// binaryName is the file a built executable must have on this platform.
+// Windows starts an executable by its extension, so a binary named without one
+// cannot be started and every journey would fail on its first command.
+func binaryName() string {
+	if runtime.GOOS == "windows" {
+		return "captaincode.exe"
 	}
+	return "captaincode"
 }
 
 func journeyBinary(t *testing.T) string {
@@ -43,7 +61,7 @@ func journeyBinary(t *testing.T) string {
 	if binary := os.Getenv("CAPTAINCODE_TEST_BINARY"); binary != "" {
 		return binary
 	}
-	binary := filepath.Join(t.TempDir(), "captaincode")
+	binary := filepath.Join(t.TempDir(), binaryName())
 	build := exec.Command("go", "build", "-o", binary, "github.com/john-nash-rs/captaincode/cmd/captaincode")
 	build.Dir = moduleRoot()
 	if out, err := build.CombinedOutput(); err != nil {
@@ -71,6 +89,11 @@ func newJourney(t *testing.T) *journey {
 	t.Helper()
 	home := t.TempDir()
 	work := t.TempDir()
+	// The key file is asked of keyring rather than assembled here. Its
+	// directory is the platform's user config directory, which is HOME on
+	// macOS, XDG_CONFIG_HOME on Linux and APPDATA on Windows; naming it by
+	// hand is how a journey comes to pass locally and fail on a runner.
+	keyfile := keyring.PathIn(testenv.ConfigDir(home))
 	j := &journey{
 		t:        t,
 		binary:   journeyBinary(t),
@@ -78,7 +101,7 @@ func newJourney(t *testing.T) *journey {
 		work:     work,
 		db:       filepath.Join(t.TempDir(), "journey.db"),
 		settings: filepath.Join(home, ".captaincode.json"),
-		keyfile:  filepath.Join(home, "Library", "Application Support", "captaincode", "openrouter.key"),
+		keyfile:  keyfile,
 	}
 	if err := os.WriteFile(filepath.Join(work, "package.json"), []byte(`{"name":"demo","version":"2.5.0"}`), 0o600); err != nil {
 		t.Fatal(err)

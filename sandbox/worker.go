@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/internal/platform"
 	"github.com/john-nash-rs/captaincode/toolbox"
 )
 
@@ -147,7 +148,12 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 	if err != nil {
 		return nil, err
 	}
-	if root == "/" {
+	// A workspace that is the filesystem root has nothing outside it to be
+	// protected from, and the profiles below bind the root read-only, which
+	// would make every file on the machine part of the workspace. filepath.Dir
+	// returns a root unchanged, so this catches "/" and "C:\" without naming
+	// either.
+	if filepath.Dir(root) == root {
 		return nil, errors.New("workspace cannot be the filesystem root")
 	}
 	var command *exec.Cmd
@@ -214,11 +220,35 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 	default:
 		return nil, errors.New("sandbox worker supports macOS and Linux only")
 	}
+	command.Env = workerEnv()
 	command.Dir = root
-	command.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "HOME=/nonexistent"}
 	isolate(command)
 	command.WaitDelay = 2 * time.Second
 	return command, nil
+}
+
+// workerEnv is the environment the worker child runs with. Nothing is
+// inherited from the operator's shell, so a tool reading the environment finds
+// no credential, no proxy setting and no override of its own behaviour.
+func workerEnv() []string {
+	// A home that cannot exist, rooted at the filesystem root on either
+	// platform and never created. The worker has no business reading the
+	// operator's home directory, and pointing the variable that names it at a
+	// path that does not exist is the portable way to say so.
+	unreadable := filepath.Join(string(os.PathSeparator), "nonexistent")
+	if runtime.GOOS == "windows" {
+		// Windows looks in USERPROFILE and APPDATA where Unix looks in HOME,
+		// so a tool hunting for the operator's SSH keys or credential store
+		// must find the same absence in all of them.
+		return append(platform.ShellEnv(),
+			"HOME="+unreadable,
+			"USERPROFILE="+unreadable,
+			"APPDATA="+unreadable,
+			"LOCALAPPDATA="+unreadable,
+			"LANG=C",
+		)
+	}
+	return append(platform.ShellEnv(), "PATH=/usr/bin:/bin", "LANG=C", "HOME="+unreadable)
 }
 
 // DarwinProfile allows platform libraries and the exact worker binary to be

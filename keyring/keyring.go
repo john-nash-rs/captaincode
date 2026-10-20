@@ -34,7 +34,15 @@ func Path() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, keyDir, keyFile), nil
+	return PathIn(base), nil
+}
+
+// PathIn is Path with the configuration directory named instead of looked up,
+// so a caller that already knows where a process will look can compute the
+// same location without changing its environment. The layout stays in one
+// place: only this function knows the directory and file names.
+func PathIn(configDir string) string {
+	return filepath.Join(configDir, keyDir, keyFile)
 }
 
 // Resolve returns the credential, preferring the environment so a temporary
@@ -82,7 +90,7 @@ func Store(key string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := private(dir, 0o700); err != nil {
 		return err
 	}
 	temp := path + ".tmp"
@@ -93,7 +101,7 @@ func Store(key string) error {
 		os.Remove(temp)
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	return private(path, 0o600)
 }
 
 // Clear removes the stored credential. The environment override, if any, is

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/internal/testenv"
+	"github.com/john-nash-rs/captaincode/keyring"
 	"github.com/john-nash-rs/captaincode/provider"
 )
 
@@ -235,13 +237,14 @@ func TestLiveNewUserJourneyFromNothingToWorking(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A run that inherits nothing from the operator's machine.
-	env := []string{
-		"HOME=" + home,
-		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+	// A run that inherits nothing from the operator's machine. The home and
+	// config directory entries come from testenv: naming HOME alone is correct
+	// on Unix and does nothing on Windows, where the binary reads USERPROFILE
+	// and APPDATA and would have read the real profile of whoever ran this.
+	env := append(testenv.ConfigEnv(home),
 		"OPENROUTER_API_KEY=",
-		"PATH=" + os.Getenv("PATH"),
-	}
+		"PATH="+os.Getenv("PATH"),
+	)
 
 	// Step one: a brand new user asks what is wrong. It must name the problem
 	// and a way out, not fail obscurely.
@@ -255,13 +258,7 @@ func TestLiveNewUserJourneyFromNothingToWorking(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`{"model":"openai/gpt-4o-mini"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	keyDir := filepath.Join(home, "Library", "Application Support", "captaincode")
-	if err := os.MkdirAll(keyDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(keyDir, "openrouter.key"), []byte(key), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeKey(t, home, key)
 
 	// Step three: doctor now confirms the setup without being asked to guess.
 	configured := run(t, binary, env, home, "doctor", "--provider", "openrouter")
@@ -291,7 +288,7 @@ func TestLiveNewUserJourneyFromNothingToWorking(t *testing.T) {
 // buildBinary compiles the command once for the journey eval.
 func buildBinary(t *testing.T) string {
 	t.Helper()
-	binary := filepath.Join(t.TempDir(), "captaincode")
+	binary := filepath.Join(t.TempDir(), binaryName())
 	cmd := exec.Command("go", "build", "-o", binary, "github.com/john-nash-rs/captaincode/cmd/captaincode")
 	cmd.Dir = repoRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -312,6 +309,24 @@ func repoRoot(t *testing.T) string {
 
 // run executes the built binary with an explicit environment and no inherited
 // credential, so the result cannot depend on the developer's shell.
+// writeKey stores a credential exactly where keyring.Resolve will read it back.
+//
+// The directory is asked of keyring rather than assembled here, because it is
+// the platform's user config directory: HOME on macOS, XDG_CONFIG_HOME on
+// Linux, APPDATA on Windows. Naming it by hand is how an eval comes to pass
+// locally and fail on a runner of a different platform.
+func writeKey(t *testing.T, home, key string) string {
+	t.Helper()
+	path := keyring.PathIn(testenv.ConfigDir(home))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func run(t *testing.T, binary string, env []string, home string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(binary, args...)
@@ -330,20 +345,13 @@ func run(t *testing.T, binary string, env []string, home string, args ...string)
 func TestLivePersistedCredentialIsUsableWithoutTheEnvironment(t *testing.T) {
 	key := evalKey(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 	t.Setenv("OPENROUTER_API_KEY", "") // no environment override
 
 	// Exactly the shape /openrouter api-key writes.
-	dir := filepath.Join(home, "Library", "Application Support", "captaincode")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "openrouter.key"), []byte(key), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := writeKey(t, home, key)
 
 	// Resolve it the way the provider does, then use it.
-	stored, err := os.ReadFile(filepath.Join(dir, "openrouter.key"))
+	stored, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/john-nash-rs/captaincode/config"
+	"github.com/john-nash-rs/captaincode/internal/testenv"
 	"time"
 
 	"github.com/john-nash-rs/captaincode/core"
@@ -24,8 +25,7 @@ import (
 // what an operator does.
 func TestLiveGrantReachesTheWorkerMidSession(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	testenv.SetConfigHome(t, home)
 	os.Unsetenv("CAPTAINCODE_CONFIG")
 
 	configPath := filepath.Join(home, ".captaincode.json")
@@ -94,8 +94,7 @@ func hasTool(defs []core.Definition, name string) bool {
 // have been lost even though it was saved.
 func TestGrantSurvivesARestart(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	testenv.SetConfigHome(t, home)
 	os.Unsetenv("CAPTAINCODE_CONFIG")
 
 	configPath := filepath.Join(home, ".captaincode.json")

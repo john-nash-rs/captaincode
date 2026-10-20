@@ -3,12 +3,15 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/john-nash-rs/captaincode/internal/testenv"
 )
 
 func TestDefaultDatabasePathIsPerWorkspace(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetConfigHome(t, t.TempDir())
 	a, err := defaultDatabasePath("/Users/someone/code/api")
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +40,7 @@ func TestDefaultDatabasePathIsPerWorkspace(t *testing.T) {
 // Two directories with the same name in different parents are the collision the
 // hash exists to prevent.
 func TestDefaultDatabasePathSeparatesSameNamedDirs(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetConfigHome(t, t.TempDir())
 	a, _ := defaultDatabasePath("/one/thing")
 	b, _ := defaultDatabasePath("/two/thing")
 	if a == b {
@@ -46,7 +49,7 @@ func TestDefaultDatabasePathSeparatesSameNamedDirs(t *testing.T) {
 }
 
 func TestDefaultDatabasePathHandlesAwkwardNames(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetConfigHome(t, t.TempDir())
 	for _, name := range []string{"/", "/Users/x/we ird", "/Users/x/../../etc", "/Users/x/.hidden"} {
 		got, err := defaultDatabasePath(name)
 		if err != nil {
@@ -134,11 +137,18 @@ func TestErrPermissionNamesThePath(t *testing.T) {
 	if !strings.Contains(wrapped.Error(), "/tmp/x/captaincode") {
 		t.Errorf("error does not name the path: %v", wrapped)
 	}
-	if !strings.Contains(wrapped.Error(), "chown") {
-		t.Errorf("permission error offers no fix: %v", wrapped)
+	// The repair command is named per platform, because advising a Windows
+	// operator to run chown is advice they cannot follow and reads as a bug in
+	// the tool rather than in their permissions.
+	repair := "chown"
+	if runtime.GOOS == "windows" {
+		repair = "icacls"
+	}
+	if !strings.Contains(wrapped.Error(), repair) {
+		t.Errorf("permission error offers no %s fix: %v", repair, wrapped)
 	}
 	other := errPermission("/tmp/x", os.ErrNotExist)
-	if strings.Contains(other.Error(), "chown") {
-		t.Errorf("non-permission error should not suggest chown: %v", other)
+	if strings.Contains(other.Error(), repair) {
+		t.Errorf("non-permission error should not suggest a %s fix: %v", repair, other)
 	}
 }

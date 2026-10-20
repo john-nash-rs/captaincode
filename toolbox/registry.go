@@ -13,12 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/internal/platform"
 )
 
 type Registry struct {
@@ -477,6 +479,30 @@ func (w *limitedWriter) Write(data []byte) (int, error) {
 	return n, nil
 }
 
+// commandEnv is the environment a model-requested command runs with: nothing
+// inherited from the operator's shell, the workspace standing in for the home
+// directory, and the platform's own system entries present so a shell can
+// start at all.
+//
+// TMPDIR is the Unix name for the temporary directory. Windows reads TEMP and
+// TMP, and a program that cannot write its temporary files reports that as a
+// failure of whatever it was asked to do, which is a confusing way to learn
+// about a missing variable.
+func commandEnv(root string) []string {
+	if runtime.GOOS == "windows" {
+		return append(platform.ShellEnv(),
+			"HOME="+root,
+			"USERPROFILE="+root,
+			"APPDATA="+root,
+			"LOCALAPPDATA="+root,
+			"TEMP="+root,
+			"TMP="+root,
+			"LANG=C",
+		)
+	}
+	return []string{"PATH=/usr/bin:/bin", "LANG=C", "HOME=" + root, "TMPDIR=" + root}
+}
+
 func (r Registry) command(ctx context.Context, call core.Call) core.Result {
 	var args struct {
 		Program string   `json:"program"`
@@ -487,7 +513,7 @@ func (r Registry) command(ctx context.Context, call core.Call) core.Result {
 	}
 	command := exec.CommandContext(ctx, args.Program, args.Args...)
 	command.Dir = r.Root
-	command.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "HOME=" + r.Root, "TMPDIR=" + r.Root}
+	command.Env = commandEnv(r.Root)
 	output := &limitedWriter{limit: r.MaxBytes}
 	command.Stdout = output
 	command.Stderr = output

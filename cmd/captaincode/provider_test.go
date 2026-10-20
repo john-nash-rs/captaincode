@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/john-nash-rs/captaincode/config"
+	"github.com/john-nash-rs/captaincode/internal/testenv"
 	"github.com/john-nash-rs/captaincode/keyring"
 )
 
@@ -58,8 +59,7 @@ func resolveStoredCredential(context.Context) (string, error) { return keyring.R
 // operator's configuration is ignored without any warning.
 func TestRunWithoutProviderFlagUsesTheConfiguredMachine(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	testenv.SetConfigHome(t, home)
 	t.Setenv("OPENROUTER_API_KEY", "")
 
 	// Exactly what /connect leaves behind.
@@ -98,8 +98,7 @@ func TestRunWithoutProviderFlagUsesTheConfiguredMachine(t *testing.T) {
 // would fail on a missing model instead of working offline.
 func TestRunWithoutProviderFlagOnAFreshMachineIsOffline(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	testenv.SetConfigHome(t, home)
 	t.Setenv("OPENROUTER_API_KEY", "")
 
 	cfg, _, err := config.Resolve("")

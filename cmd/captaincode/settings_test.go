@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/john-nash-rs/captaincode/config"
+	"github.com/john-nash-rs/captaincode/internal/testenv"
 )
 
 // A model chosen with /openrouter has to survive the process. This is the
@@ -14,8 +15,7 @@ import (
 // repeated in every new session.
 func TestStoreModelPersistsToTheResolvedConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	testenv.SetConfigHome(t, home)
 	os.Unsetenv("CAPTAINCODE_CONFIG")
 
 	root := filepath.Join(t.TempDir(), "project")
@@ -53,8 +53,7 @@ func TestStoreModelPersistsToTheResolvedConfig(t *testing.T) {
 // Writing a model must not reset limits that were already configured.
 func TestStoreModelPreservesOtherSettings(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	testenv.SetConfigHome(t, home)
 	os.Unsetenv("CAPTAINCODE_CONFIG")
 
 	path := filepath.Join(home, config.Name)

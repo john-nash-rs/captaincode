@@ -13,7 +13,7 @@ explicit tool contract, a bounded agent loop, OS-enforced sandboxing, and durabl
 run state — so that what the system did is a matter of record rather than of
 trust.
 
-> **Status: 0.4.0.** A single-operator tool, not a hosted service. It is designed
+> **Status: 0.5.0.** A single-operator tool, not a hosted service. It is designed
 > to be read, run, and audited. It is not hardened for multi-tenancy or
 > adversarial use. See [Limitations](#limitations).
 
@@ -24,71 +24,16 @@ brew install john-nash-rs/tap/captaincode      # or the one-line installer below
 captaincode                                   # then type /connect
 ```
 
-[Installation](#installation) · [Commands](#commands) · [Design](#design) ·
-[Limitations](#limitations) · [Contributing](#contributing)
+[Features](#features) · [Installation](#installation) · [Quick start](#quick-start) ·
+[Configuration](#configuration) · [Architecture](#architecture) · [Limitations](#limitations) · [Contributing](#contributing)
 
-## Should you use this?
+## Features
 
-Probably not, unless some of these are true of you:
-
-- **You need to know what your agent actually did.** Every tool call is recorded
-  with its real output. Nothing is inferred from what the model says it did.
-- **You want to read the harness, not just run it.** Eight packages, about 12k
-  lines of Go including tests, no framework, no runtime dependency.
-- **You are running one model against one project** and want that to be auditable
-  end to end.
-
-**And explicitly not, if any of these are true:**
-
-- **You need a platform where sandboxing is unavailable.** CaptainCode refuses
-  to run tools unsandboxed rather than calling that a feature.
-- **You want per-command approval prompts.** Permissions are coarse
-  project-wide grants. There is no "allow this one call?" dialog.
-- **You want the smallest thing that works.** This is more machinery than a
-  script that shells out to `claude -p`.
-- **You need it to be fast at scale.** The core loop is serial and has no
-  concurrent scheduler outside the labs.
-
-If none of that sounds like your problem, [Aider](https://github.com/Aider-AI/aider),
-[opencode](https://github.com/sst/opencode), or
-[Claude Code](https://github.com/anthropics/claude-code) will serve you better.
-
-## Why it exists
-
-Most agent failures are not model failures. A model that writes a perfectly good
-patch still causes damage when the harness cannot answer four questions:
-
-| Question | CaptainCode's answer |
-|---|---|
-| What was actually executed? | Nothing happens until intent is committed to durable state |
-| What did the tool actually observe? | Every tool result is recorded; claims are never inferred |
-| What if the process died mid-write? | The run is **blocked** for reconciliation, never reported as successful |
-| What is this tool allowed to touch? | The sandbox decides, and there is no unsandboxed fallback |
-
-## Design
-
-Eight packages, each owning one responsibility:
-
-| Package | Responsibility |
-|---|---|
-| `core` | The agent loop, budgets, context selection, run phases |
-| `toolbox` | Tool contracts: validation, path containment, stale-edit detection |
-| `sandbox` | OS-enforced isolation via `sandbox-exec` (macOS) or `bubblewrap` (Linux) |
-| `storage` | SQLite snapshots and an event index with atomic commit |
-| `provider` | OpenRouter adapter with an offline deterministic fixture |
-| `keyring` | Credential resolution and private storage |
-| `config` | Settings resolution and validation |
-| `ui` | Bubble Tea terminal interface |
-
-Two principles run through all of them:
-
-**Deny by default.** Writes and shell commands are disabled. The sandbox refuses
-to start rather than silently running tools without isolation. A failed setup is
-an error, never a quiet downgrade to something less safe.
-
-**Preserve uncertainty.** When an operation's outcome is unknown, CaptainCode
-records it as unknown. A lost HTTP reply after a commit does not become a retry;
-it becomes a blocked run that requires a human.
+- **Auditable runs.** Tool requests and their actual results are recorded in durable run state.
+- **Fail-closed sandboxing.** Tools run inside the platform sandbox: AppContainer on Windows, bubblewrap on Linux, and sandbox-exec on macOS.
+- **Read-only by default.** File edits and command execution require explicit project-wide grants.
+- **Recoverable execution.** Interrupted or uncertain mutations are recorded as blocked for human reconciliation.
+- **Local-first operation.** Runs and settings stay on your machine; the project does not provide a hosted service.
 
 ## Installation
 
@@ -120,7 +65,7 @@ the archive for your platform, verifies its SHA-256 against the release's
 are required.
 
 ```sh
-sh install.sh --version v0.4.0        # pin a specific version
+sh install.sh --version v0.5.0        # pin a specific version
 sh install.sh --dir ~/bin            # choose the install directory
 sh install.sh --help
 ```
@@ -150,7 +95,7 @@ Get-Content .\install.ps1
 
 It verifies the release ZIP against `checksums.txt`, installs to
 `%LOCALAPPDATA%\Programs\CaptainCode`, and adds that directory to your user
-`PATH`. Use `-Version v0.4.0` to pin a release, or `-InstallDir C:\Tools` to
+`PATH`. Use `-Version v0.5.0` to pin a release, or `-InstallDir C:\Tools` to
 choose another location. If replacing an existing binary, close CaptainCode
 and pass `-Force`.
 
@@ -160,7 +105,7 @@ Grab the archive and `checksums.txt` from
 [GitHub Releases](https://github.com/john-nash-rs/captaincode/releases):
 
 ```sh
-VERSION=v0.4.0
+VERSION=v0.5.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 ARCHIVE="captaincode_${VERSION#v}_${OS}_${ARCH}.tar.gz"
@@ -168,7 +113,7 @@ ARCHIVE="captaincode_${VERSION#v}_${OS}_${ARCH}.tar.gz"
 curl -fsSLO "https://github.com/john-nash-rs/captaincode/releases/download/$VERSION/$ARCHIVE"
 curl -fsSLO "https://github.com/john-nash-rs/captaincode/releases/download/$VERSION/checksums.txt"
 
-# checksums.txt lists all four platforms, so verify only the line for the
+# checksums.txt lists all six platform archives, so verify only the line for the
 # archive you downloaded. `shasum -c checksums.txt` on its own reports the
 # other three as missing and warns, even when your download is correct.
 grep " $ARCHIVE\$" checksums.txt | shasum -a 256 -c
@@ -298,54 +243,7 @@ go build -o bin/captaincode ./cmd/captaincode
 A binary built this way reports `captaincode dev` and says it is an unreleased
 build. Release builds embed their version via the linker.
 
-## Troubleshooting
-
-**`command not found: captaincode`.** The install directory is not on `PATH`.
-See [PATH troubleshooting](#path-troubleshooting).
-
-**`brew install captaincode` cannot find the formula.** Confirm the tap has a
-cask for your version:
-
-```sh
-brew tap john-nash-rs/tap
-brew info captaincode
-```
-
-If the tap lists no formula, the cask has not been published for that release.
-
-**`captaincode doctor` reports the sandbox missing.** This is the expected
-result when the platform dependency is absent, not a broken install. See
-[Sandbox prerequisites](#sandbox-prerequisites). CaptainCode will not run tools
-without isolation.
-
-**Installer: `CHECKSUM MISMATCH`.** The download is corrupt or was tampered
-with. Nothing was installed. Retry, and if it persists, download manually and
-compare against the release's `checksums.txt`.
-
-**Installer: `unsupported architecture`.** There is no prebuilt binary for your
-platform. Build from source instead.
-
-**Installer: `cannot create ~/.local/bin`.** Choose a writable location:
-
-```sh
-sh install.sh --dir ~/bin
-```
-
-**Tools do not run, but `captaincode version` works.** Installing the binary
-does not install the sandbox. Run `captaincode doctor`. On Linux, install
-bubblewrap. On macOS, check that `/usr/bin/sandbox-exec` still exists — it is
-deprecated and host or MDM policy may remove it.
-
-**`database must be outside the tool workspace`.** The `--db` path resolved
-inside the directory being exposed to tools. Pick another location.
-
-**`--tui was removed`.** The interface is the default. Use `captaincode .`, or
-add `--ide=false` for one-shot output.
-
-**`the interface needs a terminal on stdin and stdout`.** You are running
-without an interactive terminal — a pipe, a script, or CI. Add `--ide=false`.
-
-## Quick start
+## Quick Start
 
 Run in the current project:
 
@@ -577,6 +475,53 @@ OS keychain integration, no encryption at rest, and no rotation policy.
 Requests are sent to OpenRouter and its routed provider. **This can incur
 charges**, and selected project content leaves your machine.
 
+## Troubleshooting
+
+**`command not found: captaincode`.** The install directory is not on `PATH`.
+See [PATH troubleshooting](#path-troubleshooting).
+
+**`brew install captaincode` cannot find the formula.** Confirm the tap has a
+cask for your version:
+
+```sh
+brew tap john-nash-rs/tap
+brew info captaincode
+```
+
+If the tap lists no formula, the cask has not been published for that release.
+
+**`captaincode doctor` reports the sandbox missing.** This is the expected
+result when the platform dependency is absent, not a broken install. See
+[Sandbox prerequisites](#sandbox-prerequisites). CaptainCode will not run tools
+without isolation.
+
+**Installer: `CHECKSUM MISMATCH`.** The download is corrupt or was tampered
+with. Nothing was installed. Retry, and if it persists, download manually and
+compare against the release's `checksums.txt`.
+
+**Installer: `unsupported architecture`.** There is no prebuilt binary for your
+platform. Build from source instead.
+
+**Installer: `cannot create ~/.local/bin`.** Choose a writable location:
+
+```sh
+sh install.sh --dir ~/bin
+```
+
+**Tools do not run, but `captaincode version` works.** Installing the binary
+does not install the sandbox. Run `captaincode doctor`. On Linux, install
+bubblewrap on Linux, check that AppContainer is available on Windows, or check that `/usr/bin/sandbox-exec` still exists on macOS — it is
+deprecated and host or MDM policy may remove it.
+
+**`database must be outside the tool workspace`.** The `--db` path resolved
+inside the directory being exposed to tools. Pick another location.
+
+**`--tui was removed`.** The interface is the default. Use `captaincode .`, or
+add `--ide=false` for one-shot output.
+
+**`the interface needs a terminal on stdin and stdout`.** You are running
+without an interactive terminal — a pipe, a script, or CI. Add `--ide=false`.
+
 ## Configuration
 
 There is one settings file: `~/.captaincode.json`.
@@ -650,33 +595,45 @@ Enabling writes or commands is a **coarse project-wide grant, not a per-call
 approval.** There is no interactive approval prompt. Use a disposable copy of
 your project when experimenting.
 
-### Platform support
 
-| | Released | Talks to a model | Runs tools |
-|---|---|---|---|
-| macOS | yes | yes | yes, via `sandbox-exec` |
-| Linux | yes | yes | yes, via `bubblewrap` |
-| Windows | **no** | — | — |
+See [Supported platforms](#supported-platforms) for operating systems, architectures, and sandbox requirements.
 
-**No Windows build is published.** The source compiles for Windows and the
-conversation, provider and database layers all work there, but there is no
-isolation backend, and CaptainCode refuses to run tools unsandboxed rather than
-running them unsandboxed and calling it a feature. Publishing a binary where
-the central capability is missing would be worse than publishing none.
+## Design goals
 
-What is already done for Windows, so that adding a backend is not a port from
-scratch: the database lock uses `LockFileEx` rather than `flock`, process
-setup is split from the POSIX-only `Setpgid` path, and `doctor` reports the
-missing backend as a failure rather than a warning.
+Most agent failures are not model failures. A model that writes a perfectly good
+patch still causes damage when the harness cannot answer four questions:
 
-Two gaps are documented in the source rather than left to be discovered:
-process cancellation on Windows kills the immediate child rather than the whole
-tree, because Windows has no equivalent of `kill(-pgid)` and job objects are
-not yet wired up.
+| Question | CaptainCode's answer |
+|---|---|
+| What was actually executed? | Nothing happens until intent is committed to durable state |
+| What did the tool actually observe? | Every tool result is recorded; claims are never inferred |
+| What if the process died mid-write? | The run is **blocked** for reconciliation, never reported as successful |
+| What is this tool allowed to touch? | The sandbox decides, and there is no unsandboxed fallback |
 
-The context bound is measured in serialized bytes, not provider tokens. Old
-assistant and tool groups may be dropped, which loses evidence; there is no
-summarization or retrieval layer.
+## Architecture
+
+Eight packages, each owning one responsibility:
+
+| Package | Responsibility |
+|---|---|
+| `core` | The agent loop, budgets, context selection, run phases |
+| `toolbox` | Tool contracts: validation, path containment, stale-edit detection |
+| `sandbox` | OS-enforced isolation via AppContainer (Windows), `bubblewrap` (Linux), or `sandbox-exec` (macOS) |
+| `storage` | SQLite snapshots and an event index with atomic commit |
+| `provider` | OpenRouter adapter with an offline deterministic fixture |
+| `keyring` | Credential resolution and private storage |
+| `config` | Settings resolution and validation |
+| `ui` | Bubble Tea terminal interface |
+
+Two principles run through all of them:
+
+**Deny by default.** Writes and shell commands are disabled. The sandbox refuses
+to start rather than silently running tools without isolation. A failed setup is
+an error, never a quiet downgrade to something less safe.
+
+**Preserve uncertainty.** When an operation's outcome is unknown, CaptainCode
+records it as unknown. A lost HTTP reply after a commit does not become a retry;
+it becomes a blocked run that requires a human.
 
 ## Recovery semantics
 
@@ -736,7 +693,7 @@ configuration, and then publishes.
 GitHub-hosted runners cannot run every check. The sandbox probes need to build a
 network namespace and add a loopback address inside it, which the `ubuntu-24.04`
 image forbids, so the release gate uses `ubuntu-22.04`. See
-[Maintaining a release](#maintaining-a-release).
+[MAINTAINING.md](MAINTAINING.md).
 
 Action versions are pinned to commit SHAs, not tags, so a moved tag cannot
 change what runs in CI.
@@ -759,13 +716,18 @@ material ones:
 
 ## Contributing
 
-Issues and pull requests are both welcome. The most useful contributions are a
-Windows sandbox backend, a benchmark with its method stated, and a concurrency
-scheduler for the serial core loop.
+Issues and pull requests are both welcome. The most useful contributions are improvements to Windows AppContainer
+hardening, a Linux sandbox backend that does not require bubblewrap, a
+benchmark with its method stated, and a concurrency scheduler for the serial
+core loop.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for what is welcome, what will be
 declined, and why. For a security problem, please do not open a public issue —
 see [SECURITY.md](SECURITY.md).
+
+
+Release automation and maintainer instructions are documented in
+[MAINTAINING.md](MAINTAINING.md).
 
 ## License
 
@@ -775,88 +737,3 @@ MIT — see [LICENSE](LICENSE). Dependency licenses are inventoried in
 CaptainCode is not affiliated with or endorsed by OpenRouter, Anthropic, or any
 model provider.
 
-## Maintaining a release
-
-Releases are driven entirely by GitHub Actions. Nothing is published by hand.
-
-**1. Configure the token** (once). The cask is pushed to the separate
-`john-nash-rs/homebrew-tap` repository, so it needs a token the workflow's own
-`GITHUB_TOKEN` cannot provide. The tap already exists and is initialised — see
-[homebrew-tap/README.md](homebrew-tap/README.md).
-
-```sh
-gh secret set HOMEBREW_TAP_TOKEN --repo john-nash-rs/captaincode
-```
-
-Use a fine-grained token with contents read-write on `homebrew-tap` only. It
-cannot be named `GITHUB_PERSONAL_AUTH_TOKEN` as some GoReleaser guides
-suggest — GitHub reserves the `GITHUB_` prefix and rejects the name.
-
-Verify the token without pasting it into a chat or a file:
-
-```sh
-read -s TOKEN && echo
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
-  https://api.github.com/repos/john-nash-rs/homebrew-tap
-```
-
-`200` works. `401` means GitHub does not recognise the value at all — wrong,
-revoked, or expired. `403` means it is valid but lacks write access.
-
-**2. Tag and push.**
-
-```sh
-git tag -a v0.4.0 -m "CaptainCode 0.4.0"
-git push origin v0.4.0
-```
-
-The workflow runs tests, validates the GoReleaser config, builds all four
-targets, publishes the archives with `checksums.txt`, and updates the cask.
-
-**Verifying without publishing.** Build the exact artifacts locally:
-
-```sh
-goreleaser check
-goreleaser release --snapshot --clean --skip=publish
-ls dist/
-sh -cd dist && shasum -a 256 -c checksums.txt
-```
-
-### Things that will bite you
-
-Every item here was hit while publishing 0.1.0. They are properties of the
-environment, not of this code.
-
-**Releases cannot be re-run.** GitHub rejects a second upload of an asset that
-already exists, and the failure happens before the cask is pushed:
-
-```
-422 Validation Failed [{Resource:ReleaseAsset Field:name Code:already_exists}]
-```
-
-So re-running the workflow is not a way to repair a broken cask. To re-release
-the same version, delete the assets or the release first:
-
-```sh
-gh release delete v0.4.0 --repo john-nash-rs/captaincode --yes
-git push origin :refs/tags/v0.4.0
-```
-
-That leaves a window with no binaries, so prefer a new version number.
-
-**A failed cask push does not roll back the release.** On 0.1.0 the archives
-published successfully and only the tap push failed; the release stayed live
-while the workflow reported failure. Publish the cask by hand from `dist/` and
-nothing is lost.
-
-**The verify gate cannot run on `ubuntu-24.04`.** The sandbox probes build a
-network namespace and add a loopback address inside it, and that runner image
-runs jobs in a container which forbids `RTM_NEWADDR`, so bubblewrap fails with
-`Failed RTM_NEWADDR: Operation not permitted`. The gate runs on `ubuntu-22.04`
-for that reason. Do not bump it without moving to a runner that permits these
-namespaces.
-
-**Do not validate the config with `go run`.** GoReleaser 2.18.3 requires Go
-1.27.1 or newer, and the project pins Go 1.26.9 with `GOTOOLCHAIN=local`. The
-workflow installs GoReleaser as a binary in `install-only` mode instead, so one
-version both validates the configuration and performs the release.

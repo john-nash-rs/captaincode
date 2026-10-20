@@ -31,6 +31,11 @@ import (
 // whether it is right by trying to read a file the container must not reach.
 const procThreadAttributeSecurityCapabilities = 0x00020009
 
+// diagnoseWithoutContainer makes buildLauncher start the child without the
+// container, so the diagnostic probe can tell a launch fault from a
+// containment fault in a single run. Nothing outside the diagnostic sets it.
+var diagnoseWithoutContainer = false
+
 // platformState is a started child and everything that has to outlive the
 // CreateProcess call: the job object that owns the whole tree, and this side
 // of the pipes.
@@ -453,14 +458,20 @@ func buildLauncher(c *Command, sid *appContainerIdentity, st *platformState) (*l
 	// No capabilities. The list is empty on purpose: an AppContainer is
 	// denied the network by default, and the internet capabilities are what
 	// would hand it back. There is no setting that grants them.
-	capabilities := securityCapabilities{appContainerSid: sid.sid}
-	if err := attributes.Update(
-		procThreadAttributeSecurityCapabilities,
-		unsafe.Pointer(&capabilities),
-		unsafe.Sizeof(capabilities),
-	); err != nil {
-		result.close()
-		return nil, fmt.Errorf("set appcontainer capabilities: %w", err)
+	//
+	// diagnoseWithoutContainer exists only for the diagnostic probe, which
+	// has to start the same child without the container to tell a launch
+	// fault from a containment fault. It is never set in production.
+	if !diagnoseWithoutContainer {
+		capabilities := securityCapabilities{appContainerSid: sid.sid}
+		if err := attributes.Update(
+			procThreadAttributeSecurityCapabilities,
+			unsafe.Pointer(&capabilities),
+			unsafe.Sizeof(capabilities),
+		); err != nil {
+			result.close()
+			return nil, fmt.Errorf("set appcontainer capabilities: %w", err)
+		}
 	}
 	result.inherited = st.childHandles()
 	if len(result.inherited) > 0 {

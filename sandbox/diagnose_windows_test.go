@@ -3,31 +3,28 @@ package sandbox
 import (
 	"context"
 	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/john-nash-rs/captaincode/toolbox"
 )
 
-// TestWindowsContainerDiagnosis exists to print what a container can actually
-// see, because the boundary failures on Windows report only an exit code and a
-// shell that says nothing. It is opt-in so it never runs as part of the suite;
-// it asserts nothing and its output is the point.
+// TestWindowsContainerDiagnosis exists to find out why a container cannot run
+// even a command that touches no files. It is opt-in so it never runs as part
+// of the suite; it asserts nothing and its output is the point.
+//
+// It runs the same child twice: once inside the container and once with the
+// container attribute left off, everything else identical. If the second run
+// works, the launch path, the pipes, the environment and the job are all fine
+// and the container is what fails; if both fail, the fault is before the
+// container is ever involved.
 func TestWindowsContainerDiagnosis(t *testing.T) {
 	if os.Getenv("CAPTAINCODE_DIAGNOSE") != "1" {
 		t.Skip("set CAPTAINCODE_DIAGNOSE=1 to print the container's view")
 	}
-	if runtime.GOOS != "windows" {
-		t.Skip("windows only")
-	}
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "inside.txt"), []byte("inside canary"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	probe := func(label string, args []string) {
-		worker := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 4096}}
+	worker := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 4096}}
+	run := func(label string, args []string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		command, err := worker.Command(ctx, args)
@@ -35,18 +32,17 @@ func TestWindowsContainerDiagnosis(t *testing.T) {
 			t.Logf("[%s] Command error: %v", label, err)
 			return
 		}
+		start := time.Now()
 		output, err := command.CombinedOutput()
-		t.Logf("[%s] err=%v\n%s", label, err, output)
+		t.Logf("[%s] err=%v elapsed=%s output=%q", label, err, time.Since(start), output)
 	}
-	inside := filepath.Join(root, "inside.txt")
-	// Does the shell run at all?
-	probe("echo", []string{"/c", "echo hello"})
-	// Does it know where it is, and can it list the workspace?
-	probe("cwd+dir", []string{"/c", `cd & dir`})
-	// Can it read a file by absolute path, with the error spelled out?
-	probe("type", []string{"/c", `type "` + inside + `"`})
-	// Can it write at all, not at all?
-	probe("write", []string{"/c", `echo x>"` + filepath.Join(root, "new.txt") + `" & echo wrote`})
-	// Does a read of something outside the workspace fail differently?
-	probe("outside", []string{"/c", `type "` + os.Getenv("COMSPEC") + `"`})
+	t.Logf("=== inside the container ===")
+	run("container:echo", []string{"/c", "echo hello"})
+	run("container:exit0", []string{"/c", "exit 0"})
+
+	diagnoseWithoutContainer = true
+	defer func() { diagnoseWithoutContainer = false }()
+	t.Logf("=== container attribute left off ===")
+	run("plain:echo", []string{"/c", "echo hello"})
+	run("plain:exit0", []string{"/c", "exit 0"})
 }

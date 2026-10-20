@@ -77,9 +77,37 @@ jobs:
       - name: Validate the GoReleaser configuration
         run: goreleaser check
 
+  verify-windows:
+    name: verify Windows
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          tag: ${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - run: go mod verify
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+        env:
+          CAPTAINCODE_SANDBOX_TEST: '1'
+      - name: Build and smoke the Windows executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path bin -Force | Out-Null
+          go build -trimpath -ldflags "-s -w -X main.version=${{ inputs.tag || github.ref_name }}" -o bin/captaincode.exe ./cmd/captaincode
+          .\bin\captaincode.exe version
+      - name: Release journey
+        env:
+          CAPTAINCODE_TEST_BINARY: ${{ github.workspace }}\bin\captaincode.exe
+        run: go test -count=1 -v ./evals/ -run 'Journey'
+
   release:
     name: release
-    needs: verify
+    needs: [verify, verify-windows]
     runs-on: ubuntu-24.04
     # Only the release job may write. contents:write is required to create the
     # GitHub Release and upload artifacts. Nothing else is granted.

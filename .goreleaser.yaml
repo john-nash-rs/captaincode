@@ -28,6 +28,7 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
@@ -42,6 +43,10 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     files:
       - LICENSE
       - README.md
@@ -136,7 +141,11 @@ release:
 
     ```
     curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.sh | sh
+
+    # Windows PowerShell (download and inspect install.ps1 before running):
+    Invoke-WebRequest https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.ps1 -OutFile install.ps1
+    .\\install.ps1
     ```
 
-    The installer resolves the latest release, verifies the archive against
-    checksums.txt, and installs to ~/.local/bin without privileges.
+    The installers resolve the latest release, verify its archive against
+    checksums.txt, and install to a per-user directory without privileges.

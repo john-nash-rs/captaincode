@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/john-nash-rs/captaincode?label=release)](https://github.com/john-nash-rs/captaincode/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
-[![platform](https://img.shields.io/badge/macOS%20%7C%20Linux-informational?logo=apple&logoColor=white)](https://github.com/john-nash-rs/captaincode#supported-platforms)
+[![platform](https://img.shields.io/badge/macOS%20%7C%20Linux%20%7C%20Windows-informational?logo=apple&logoColor=white)](https://github.com/john-nash-rs/captaincode#supported-platforms)
 
 An agent harness in Go, for one person on one machine. It wraps a model in an
 explicit tool contract, a bounded agent loop, OS-enforced sandboxing, and durable
@@ -40,9 +40,8 @@ Probably not, unless some of these are true of you:
 
 **And explicitly not, if any of these are true:**
 
-- **You need Windows.** There is no Windows build. The source compiles, but
-  there is no isolation backend, and CaptainCode refuses to run tools unsandboxed
-  rather than run them unsandboxed and call it a feature.
+- **You need a platform where sandboxing is unavailable.** CaptainCode refuses
+  to run tools unsandboxed rather than calling that a feature.
 - **You want per-command approval prompts.** Permissions are coarse
   project-wide grants. There is no "allow this one call?" dialog.
 - **You want the smallest thing that works.** This is more machinery than a
@@ -139,6 +138,22 @@ sh install.sh --help
 > It is 326 lines and its only network fetches are the release metadata, your
 > platform's archive, and `checksums.txt`.
 
+### Windows PowerShell installer
+
+Download the installer, inspect it, then run it in PowerShell:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/john-nash-rs/captaincode/main/install.ps1 -OutFile install.ps1
+Get-Content .\install.ps1
+.\install.ps1
+```
+
+It verifies the release ZIP against `checksums.txt`, installs to
+`%LOCALAPPDATA%\Programs\CaptainCode`, and adds that directory to your user
+`PATH`. Use `-Version v0.4.0` to pin a release, or `-InstallDir C:\Tools` to
+choose another location. If replacing an existing binary, close CaptainCode
+and pass `-Force`.
+
 ### Manual download
 
 Grab the archive and `checksums.txt` from
@@ -177,8 +192,10 @@ already. If that directory is not on your `PATH`, see
 |---|---|
 | macOS | `arm64` (Apple Silicon), `amd64` (Intel) |
 | Linux | `amd64` (x86-64), `arm64` (aarch64) |
+| Windows | `amd64` (x64), `arm64` |
 
-Linux requires kernel **3.10+**. Windows is not supported.
+Linux requires kernel **3.10+**. Windows requires AppContainer support (Windows 8
+or newer); Windows 10 and 11 are recommended.
 
 ### Verify the installation
 
@@ -201,6 +218,7 @@ Installing the binary does **not** install its sandbox dependency.
 |---|---|---|
 | macOS | `/usr/bin/sandbox-exec` | Ships with the OS. Deprecated by Apple; host or MDM policy may remove it. |
 | Linux | `bubblewrap` (`bwrap`) | `sudo apt-get install bubblewrap`, plus unprivileged user namespaces |
+| Windows | AppContainer | Built into Windows 8 and newer; no separate sandbox package is required. |
 
 If `doctor` reports a missing sandbox, tools will not run. That is the
 intended behaviour, not a bug.
@@ -215,12 +233,18 @@ curl -fsSL https://raw.githubusercontent.com/john-nash-rs/captaincode/main/insta
 Or download the new release manually. Check [releases](https://github.com/john-nash-rs/captaincode/releases)
 for what changed.
 
+On Windows, rerun the PowerShell installer with `-Force` to replace the current
+binary.
+
 ### Uninstall
 
 ```sh
 brew uninstall captaincode                        # Homebrew
 rm ~/.local/bin/captaincode                       # shell installer
 ```
+
+On Windows, remove `%LOCALAPPDATA%\Programs\CaptainCode` and remove that
+directory from your user `PATH`.
 
 Your settings and your stored credential live outside the binary and are **not**
 removed by uninstalling. To find where they actually are on your machine:

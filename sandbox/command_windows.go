@@ -209,20 +209,20 @@ func (c *Command) Start() error {
 func (st *platformState) openPipes(c *Command) error {
 	var err error
 	if c.Stdin != nil {
-		child, parent, err := inheritablePipe()
+		read, write, err := inheritablePipe()
 		if err != nil {
 			return fmt.Errorf("stdin: %w", err)
 		}
-		st.childStdin, st.stdin = child, os.NewFile(uintptr(parent), "worker-stdin")
+		st.childStdin, st.stdin = read, os.NewFile(uintptr(write), "worker-stdin")
 	} else if st.childStdin, err = nullDevice(); err != nil {
 		return fmt.Errorf("stdin: %w", err)
 	}
 	if c.Stdout != nil {
-		child, parent, err := inheritablePipe()
+		read, write, err := inheritablePipe()
 		if err != nil {
 			return fmt.Errorf("stdout: %w", err)
 		}
-		st.childStdout, st.stdout = child, os.NewFile(uintptr(parent), "worker-stdout")
+		st.childStdout, st.stdout = write, os.NewFile(uintptr(read), "worker-stdout")
 	} else if st.childStdout, err = nullDevice(); err != nil {
 		return fmt.Errorf("stdout: %w", err)
 	}
@@ -231,11 +231,11 @@ func (st *platformState) openPipes(c *Command) error {
 			st.childStderr, st.stderr = st.childStdout, st.stdout
 			st.stderrAliasesStdout = true
 		} else {
-			child, parent, err := inheritablePipe()
+			read, write, err := inheritablePipe()
 			if err != nil {
 				return fmt.Errorf("stderr: %w", err)
 			}
-			st.childStderr, st.stderr = child, os.NewFile(uintptr(parent), "worker-stderr")
+			st.childStderr, st.stderr = write, os.NewFile(uintptr(read), "worker-stderr")
 		}
 	} else if st.childStderr, err = nullDevice(); err != nil {
 		return fmt.Errorf("stderr: %w", err)
@@ -423,12 +423,11 @@ func (st *platformState) closeParentPipes() {
 	if st.stdout != nil {
 		st.stdout.Close()
 		st.stdout = nil
-		st.stderr = nil
 	}
-	if st.stderr != nil {
+	if st.stderr != nil && !st.stderrAliasesStdout {
 		st.stderr.Close()
-		st.stderr = nil
 	}
+	st.stderr = nil
 }
 
 func (st *platformState) closeAll() {
@@ -547,16 +546,18 @@ func (l *launcher) close() {
 	}
 }
 
-// inheritablePipe creates a pipe whose ends are both inheritable. Which end
-// actually crosses into the child is decided by the handle list, not by the
-// inherit bit; the bit is what makes a handle eligible at all.
-func inheritablePipe() (child, parent windows.Handle, err error) {
+// inheritablePipe creates a pipe whose ends are both inheritable. The caller
+// passes the read end to whichever process consumes bytes and the write end to
+// whichever process produces them. Which handles cross into the child is
+// decided by the handle list, not by the inherit bit; the bit only makes a
+// handle eligible for inheritance.
+func inheritablePipe() (read, write windows.Handle, err error) {
 	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{}))}
 	attributes.InheritHandle = 1
-	if err := windows.CreatePipe(&child, &parent, &attributes, 0); err != nil {
+	if err := windows.CreatePipe(&read, &write, &attributes, 0); err != nil {
 		return 0, 0, fmt.Errorf("create pipe: %w", err)
 	}
-	return child, parent, nil
+	return read, write, nil
 }
 
 // environmentBlock encodes the child's environment in the Unicode block

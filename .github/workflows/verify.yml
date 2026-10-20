@@ -23,13 +23,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y bubblewrap curl
       - run: go mod verify
       - run: go vet ./...
-      - name: TEMPORARY container diagnosis
-        if: runner.os == 'Windows'
-        shell: bash
-        continue-on-error: true
-        run: go test -count=1 -v ./sandbox/ -run 'TestWindowsContainerDiagnosis'
-        env:
-          CAPTAINCODE_DIAGNOSE: '1'
       - name: Test
         # The race detector links against a C toolchain that the Windows runner
         # does not reliably provide. The tests still run there, without the

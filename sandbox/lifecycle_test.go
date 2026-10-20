@@ -76,9 +76,8 @@ func shellRun(t *testing.T, program, script string, args ...string) []string {
 // exercised on one operating system is a rule that is wrong on two.
 func substituteWindowsArgs(script string, args []string) string {
 	for i := len(args); i >= 1; i-- {
-		// The value substitutes bare: the Windows scripts carry their own
-		// quoting around the placeholder (`"%~1"`), exactly as the Unix ones
-		// do (`"$1"`), so adding quotes here would double them.
+		// The value substitutes bare so each caller can quote it according to
+		// the shell syntax it uses.
 		value := args[i-1]
 		// The tilde form is replaced first so its own `%1` is not caught by
 		// the plain rule.
@@ -90,9 +89,8 @@ func substituteWindowsArgs(script string, args []string) string {
 
 // The probes lean on substituteWindowsArgs being exact, and it runs on
 // platforms this test can execute even though its caller's branch only runs on
-// Windows. A doubled quote or an unsubstituted placeholder is a command that
-// fails for a reason that has nothing to do with the boundary under test,
-// which is the failure mode that produced this helper in the first place.
+// Windows. An unsubstituted placeholder is a command that fails for a reason
+// that has nothing to do with the boundary under test.
 func TestSubstituteWindowsArgs(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -187,7 +185,10 @@ func TestOSCancellationStopsHeartbeat(t *testing.T) {
 	// cancellation and not the presence of sh.
 	var script string
 	if runtime.GOOS == "windows" {
-		script = `for /l %i in (1,1,1000000) do @(echo x>>"%1" & ping -n 1 127.0.0.1 >nul)`
+		// t.TempDir paths on the hosted Windows runner contain no spaces. Keep
+		// the path unquoted because cmd.exe parses /c text differently from the
+		// C-runtime quoting used to compose the CreateProcess command line.
+		script = `for /l %i in (1,1,1000000) do @(echo x>>%1 & ping -n 1 127.0.0.1 >nul)`
 	} else {
 		script = `while true; do printf x >> "$1"; sleep 0.03; done`
 	}

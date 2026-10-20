@@ -170,12 +170,20 @@ func TestReadOnlyLeavesTheWorkspaceAlone(t *testing.T) {
 	}
 	root := t.TempDir()
 	target := filepath.Join(root, "new.txt")
+	// What the worker is told to write. On Linux the backend mounts the
+	// workspace at a fixed path, so the host path is not what the worker
+	// sees; naming it would fail for a reason that has nothing to do with
+	// writes being off.
+	guest := target
+	if runtime.GOOS == "linux" {
+		guest = "/workspace/new.txt"
+	}
 	write := script{unix: `printf changed > "$1"`, windows: `echo changed>"%~1"`}.forPlatform()
 	attempt := func(writes bool) error {
 		worker := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 512, AllowWrites: writes}}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		command, err := worker.Command(ctx, shellRun(t, "probe", write, target))
+		command, err := worker.Command(ctx, shellRun(t, "probe", write, guest))
 		if err != nil {
 			return err
 		}
@@ -195,7 +203,7 @@ func TestReadOnlyLeavesTheWorkspaceAlone(t *testing.T) {
 	// same shell succeed is what makes the refusal above mean "the sandbox
 	// stopped it" rather than "nothing happened".
 	if err := attempt(true); err != nil {
-		t.Fatalf("the same write succeeded once writes were allowed, so the refusal above was not the sandbox's:\n%v", err)
+		t.Fatalf("writes were allowed but the same write still failed:\n%v", err)
 	}
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("writes were allowed but no file appeared: %v", err)

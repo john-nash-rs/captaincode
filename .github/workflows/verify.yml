@@ -38,6 +38,13 @@ jobs:
           fi
         env:
           CAPTAINCODE_SANDBOX_TEST: '1'
+      - name: TEMPORARY container diagnosis
+        if: runner.os == 'Windows'
+        shell: bash
+        continue-on-error: true
+        run: go test -count=1 -v ./sandbox/ -run 'TestWindowsContainerDiagnosis'
+        env:
+          CAPTAINCODE_DIAGNOSE: '1'
       - name: Build
         # go build -o keeps the name it is given, and a Windows executable
         # without a .exe suffix cannot be started, so the suffix is not

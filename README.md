@@ -693,7 +693,7 @@ configuration, and then publishes.
 GitHub-hosted runners cannot run every check. The sandbox probes need to build a
 network namespace and add a loopback address inside it, which the `ubuntu-24.04`
 image forbids, so the release gate uses `ubuntu-22.04`. See
-[Maintaining a release](#maintaining-a-release).
+[MAINTAINING.md](MAINTAINING.md).
 
 Action versions are pinned to commit SHAs, not tags, so a moved tag cannot
 change what runs in CI.

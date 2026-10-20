@@ -46,10 +46,6 @@ import (
 // second user gets a different SID from the same code.
 const appContainerName = "CaptainCode.ToolWorker"
 
-// fileAllAccessMask is FILE_ALL_ACCESS from winnt.h, expanded to file-specific
-// rights so SetEntriesInAcl does not store an unmapped GENERIC_ALL ACE.
-const fileAllAccessMask = windows.ACCESS_MASK(0x001f01ff)
-
 // hresultAlreadyExists is returned by CreateAppContainerProfile when the
 // profile is already there, which is the ordinary case after the first run.
 const hresultAlreadyExists = 0x800700b7
@@ -137,55 +133,28 @@ func openAppContainer() (*appContainerIdentity, error) {
 	return &appContainerIdentity{sid: sid}, nil
 }
 
-// cageACL is where the boundary is actually drawn. It runs before the worker
-// exists and is undone by cageCleanup once it is gone.
-//
-// Read-only mode needs one grant and nothing else: the container is denied the
-// workspace by default, so naming it is what makes reading possible, and not
-// naming it writable is what makes writing impossible. There is no deny to add
-// beyond the absence of a grant.
-//
-// Writes-on cannot work that way. To write a file the container has to be able
-// to modify the directory that holds it, which means granting modification
-// rather than traversal — and that is the hole the second half of this
-// function is about.
-//
-// It returns the secrets it denied so that cleanup removes exactly those, and
-// not whatever happens to exist at cleanup time. Re-deriving the list later
-// would mean a directory created during the run is denied but never restored,
-// and the operator is left locked out of their own credentials.
+// cageACL is where the boundary is actually drawn. AppContainer access rules
+// use an allowlist: package SID deny ACEs are not a reliable way to subtract
+// access already granted elsewhere, so secret paths are never granted access.
+// It returns every path changed so cleanup removes only this run's entries.
 func cageACL(root string, sid *appContainerIdentity, writes bool) ([]string, error) {
-	if !writes {
-		if err := grantContainerRead(root, sid); err != nil {
-			return nil, err
-		}
-		denied, err := denyContainerWrite(root, sid)
-		if err != nil {
-			removeDenyContainerRead(denied, sid)
-			revokeContainer(root, sid)
-			return nil, err
-		}
-		return denied, nil
+	var changed []string
+	var err error
+	if writes {
+		changed, err = grantContainerWrite(root, sid)
+	} else {
+		changed, err = grantContainerRead(root, sid)
 	}
-	if err := grantContainerWrite(root, sid); err != nil {
-		return nil, err
-	}
-	denied, err := denyContainerRead(root, sid)
 	if err != nil {
-		// Taking the grant back before returning leaves the workspace exactly
-		// as it was found. A half-applied boundary is worse than a refusal,
-		// because a refusal says what happened.
-		removeDenyContainerRead(denied, sid)
-		revokeContainer(root, sid)
+		revokeContainerPaths(changed, sid)
 		return nil, err
 	}
-	return denied, nil
+	return changed, nil
 }
 
 // cageCleanup undoes whatever cageACL and grantExecutable did.
-func cageCleanup(root string, sid *appContainerIdentity, denied []string, executableGrant string) {
-	removeDenyContainerRead(denied, sid)
-	revokeContainer(root, sid)
+func cageCleanup(_ string, sid *appContainerIdentity, changed []string, executableGrant string) {
+	revokeContainerPaths(changed, sid)
 	if executableGrant != "" {
 		for _, subject := range containerAccessSIDs(sid) {
 			_ = revokeEntry(executableGrant, subject)
@@ -197,29 +166,67 @@ func cageCleanup(root string, sid *appContainerIdentity, denied []string, execut
 // against.
 //
 // Only the container's own SID is granted access to the workspace. Granting
-// ALL APPLICATION PACKAGES here would let the worker use that broad group to
-// bypass the per-container denies on .ssh and other secrets.
+// ALL APPLICATION PACKAGES here would give every AppContainer the same access.
 func containerAccessSIDs(sid *appContainerIdentity) []*windows.SID {
 	return []*windows.SID{sid.sid}
 }
 
-// grantContainerRead names the container, and only the container, in the
-// workspace's access list with read and execute.
-func grantContainerRead(root string, sid *appContainerIdentity) error {
-	// Read and execute, plus the synchronize bit. Opening a directory for
-	// traversal is a separate right and a tool that cannot open its own
-	// working directory reports the whole workspace as missing.
+// grantContainerRead gives access only to existing workspace objects that are
+// outside the credential paths. The root ACE is not inherited, so it cannot
+// silently grant access to a secret directory beneath it.
+func grantContainerRead(root string, sid *appContainerIdentity) ([]string, error) {
 	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_EXECUTE)
-	return setContainerEntries(root, []*windows.SID{sid.sid}, windows.GRANT_ACCESS, mask, true)
+	return grantWorkspace(root, sid, mask)
 }
 
-// grantContainerWrite widens the workspace to modification for the container.
-//
-// The grant is scoped to this container's SID and inherited by files it
-// creates. A grant to ALL APPLICATION PACKAGES would also cover the secret
-// directories below this workspace and would defeat their explicit denies.
-func grantContainerWrite(root string, sid *appContainerIdentity) error {
-	return setContainerEntries(root, containerAccessSIDs(sid), windows.GRANT_ACCESS, windows.GENERIC_ALL, true)
+// grantContainerWrite gives write access only to workspace objects outside
+// the credential paths. Per-directory inheritance lets the worker use files
+// it creates beneath an allowed directory; the root entry is non-inheriting.
+func grantContainerWrite(root string, sid *appContainerIdentity) ([]string, error) {
+	return grantWorkspace(root, sid, windows.GENERIC_ALL)
+}
+
+func grantWorkspace(root string, sid *appContainerIdentity, mask windows.ACCESS_MASK) ([]string, error) {
+	var changed []string
+	grant := func(path string, isDir bool) error {
+		if err := setContainerEntries(path, containerAccessSIDs(sid), windows.GRANT_ACCESS, mask, isDir); err != nil {
+			return err
+		}
+		changed = append(changed, path)
+		return nil
+	}
+	if err := grant(root, false); err != nil {
+		return changed, err
+	}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		first := strings.SplitN(relative, string(os.PathSeparator), 2)[0]
+		for _, secret := range secretNames {
+			if strings.EqualFold(first, secret) {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		return grant(path, entry.IsDir())
+	})
+	if err != nil {
+		return changed, fmt.Errorf("grant workspace access: %w", err)
+	}
+	return changed, nil
 }
 
 // secretNames are the directories inside a workspace that hold credentials and
@@ -230,94 +237,11 @@ func grantContainerWrite(root string, sid *appContainerIdentity) error {
 // cannot rely on.
 var secretNames = []string{".git", ".env", ".ssh", ".aws", ".codex"}
 
-// denyContainerRead refuses those directories to the container, and returns
-// the paths it actually denied.
-func denyContainerRead(root string, sid *appContainerIdentity) ([]string, error) {
-	subjects := denySubjects(sid)
-	mask := fileAllAccessMask
-	var denied []string
-	for _, name := range secretNames {
-		path := filepath.Join(root, name)
-		_, err := os.Lstat(path)
-		if err != nil {
-			// Not present, so there is nothing to deny. Skipping is right: an
-			// entry for a path that does not exist could not be removed later
-			// from something that is not there.
-			continue
-		}
-		// Rewriting a directory's inheritable ACE does not reliably update
-		// existing children on every filesystem. Deny every existing object as
-		// well, so files created before this run cannot keep an earlier allow.
-		err = filepath.WalkDir(path, func(entryPath string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.Type()&os.ModeSymlink != 0 {
-				return nil
-			}
-			if err := setContainerEntries(entryPath, subjects, windows.DENY_ACCESS, mask, entry.IsDir()); err != nil {
-				return err
-			}
-			denied = append(denied, entryPath)
-			return nil
-		})
-		if err != nil {
-			return denied, fmt.Errorf("deny secret path %s: %w", path, err)
-		}
-	}
-	return denied, nil
-}
-
-// denyContainerWrite denies write rights explicitly in read-only mode. The
-// ACE is inherited and also applies to the workspace directory itself, where
-// FILE_ADD_FILE is checked when the worker creates a file.
-func denyContainerWrite(root string, sid *appContainerIdentity) ([]string, error) {
-	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_WRITE | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
-	if err := setContainerEntries(root, denySubjects(sid), windows.DENY_ACCESS, mask, true); err != nil {
-		return nil, err
-	}
-	return []string{root}, nil
-}
-
-// denySubjects is who a deny has to name to actually deny the container.
-//
-// Only the container's own SID, and deliberately neither the operator's user
-// SID nor the all-packages group. A workspace grant to a shared package group
-// would authorize every AppContainer and could override these per-container
-// boundaries.
-//
-// That is why a user-SID deny is worse than useless here. It would not be
-// what makes the deny bind — the missing container grant is — and it would
-// land on the operator's real keys. Its only removal is this process calling
-// removeDenyContainerRead, so a run that died before cleanup would leave the
-// operator locked out of their own .ssh.
-//
-// A deny that names only the container's own SID is precise, and costs nothing
-// if it outlives its run, because the operator does not hold that SID.
-func denySubjects(sid *appContainerIdentity) []*windows.SID {
-	return []*windows.SID{sid.sid}
-}
-
-// removeDenyContainerRead takes the secret denies back off exactly the paths
-// they were placed on.
-func removeDenyContainerRead(denied []string, sid *appContainerIdentity) {
-	subjects := denySubjects(sid)
-	for _, path := range denied {
-		for _, subject := range subjects {
+func revokeContainerPaths(paths []string, sid *appContainerIdentity) {
+	for _, path := range paths {
+		for _, subject := range containerAccessSIDs(sid) {
 			_ = revokeEntry(path, subject)
 		}
-	}
-}
-
-// revokeContainer removes every entry cageACL and grantExecutable added.
-//
-// The directory holding the worker binary is included because grantExecutable
-// may have named the container in it. Leaving that behind would let the
-// container start a program from a directory it has no business in after the
-// run that needed it is over.
-func revokeContainer(root string, sid *appContainerIdentity) {
-	for _, subject := range containerAccessSIDs(sid) {
-		_ = revokeEntry(root, subject)
 	}
 }
 

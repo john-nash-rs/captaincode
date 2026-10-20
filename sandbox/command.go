@@ -59,11 +59,9 @@ type Command struct {
 	// on the other platforms, whose isolation ends when the process is
 	// created.
 	container *appContainerIdentity
-	// denied and executableGrant record what was changed on disk, so that
-	// cleanup removes exactly those entries and not whatever happens to be
-	// true at cleanup time. A boundary placed for one run and guessed at
-	// afterwards is how an operator ends up locked out of their own keys.
-	denied   []string
+	// aclPaths and executableGrant record what was changed on disk, so cleanup
+	// removes only this run's temporary access entries.
+	aclPaths []string
 	exeGrant string
 
 	started bool

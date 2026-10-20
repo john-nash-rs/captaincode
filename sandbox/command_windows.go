@@ -197,21 +197,34 @@ func (c *Command) Start() error {
 }
 
 // openPipes builds this process's pipes to the child.
+//
+// The child is always given three real handles. STARTF_USESTDHANDLES tells
+// Windows to use the handles in the startup information and not to invent
+// console ones, and a zero there is not "no stream" -- it is a null handle that
+// a program writing its output will fail against. cmd.exe is where that shows
+// up first: a command as ordinary as `echo hello` exits non-zero having printed
+// nothing, which reads like a containment failure and is not one. A stream the
+// caller did not ask for is pointed at the null device instead, which is what
+// os/exec does on this platform.
 func (st *platformState) openPipes(c *Command) error {
+	var err error
 	if c.Stdin != nil {
 		child, parent, err := inheritablePipe()
 		if err != nil {
-			return err
+			return fmt.Errorf("stdin: %w", err)
 		}
 		st.childStdin, st.stdin = child, os.NewFile(uintptr(parent), "worker-stdin")
+	} else if st.childStdin, err = nullDevice(); err != nil {
+		return fmt.Errorf("stdin: %w", err)
 	}
-	// A nil output is the null device, as in os/exec.
 	if c.Stdout != nil {
 		child, parent, err := inheritablePipe()
 		if err != nil {
 			return fmt.Errorf("stdout: %w", err)
 		}
 		st.childStdout, st.stdout = child, os.NewFile(uintptr(parent), "worker-stdout")
+	} else if st.childStdout, err = nullDevice(); err != nil {
+		return fmt.Errorf("stdout: %w", err)
 	}
 	if c.Stderr != nil {
 		if interfaceEqual(c.Stdout, c.Stderr) {
@@ -224,8 +237,36 @@ func (st *platformState) openPipes(c *Command) error {
 			}
 			st.childStderr, st.stderr = child, os.NewFile(uintptr(parent), "worker-stderr")
 		}
+	} else if st.childStderr, err = nullDevice(); err != nil {
+		return fmt.Errorf("stderr: %w", err)
 	}
 	return nil
+}
+
+// nullDevice opens NUL as an inheritable handle for a stream the caller did not
+// ask for. It is inherited like any other, so it is closed with the rest.
+func nullDevice() (windows.Handle, error) {
+	path, err := windows.UTF16PtrFromString("NUL")
+	if err != nil {
+		return 0, err
+	}
+	attributes := windows.SecurityAttributes{
+		Length:        uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
+		InheritHandle: 1,
+	}
+	handle, err := windows.CreateFile(
+		path,
+		windows.GENERIC_READ|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		&attributes,
+		windows.OPEN_EXISTING,
+		0,
+		0,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return handle, nil
 }
 
 // startCopies shuttles bytes between the caller's readers and writers and the

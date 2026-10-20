@@ -59,10 +59,11 @@ type Command struct {
 	// on the other platforms, whose isolation ends when the process is
 	// created.
 	container *appContainerIdentity
-	// aclPaths and executableGrant record what was changed on disk, so cleanup
-	// removes only this run's temporary access entries.
-	aclPaths []string
-	exeGrant string
+	// aclPaths, protectedPaths and executableGrant record what was changed on
+	// disk, so cleanup removes only this run's temporary access entries.
+	aclPaths       []string
+	protectedPaths []string
+	exeGrant       string
 
 	started bool
 	// state is a pointer because it holds the wait group that tracks the

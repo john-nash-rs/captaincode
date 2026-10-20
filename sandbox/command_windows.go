@@ -91,11 +91,14 @@ func (c *Command) Start() error {
 	// exists, so there is no window in which a child runs with less
 	// protection than was asked for. cageACL fails closed: if the write hole
 	// cannot be cut, no process is created at all.
-	aclPaths, err := cageACL(c.root, sid, c.writes)
+	aclPaths, protectedPaths, err := cageACL(c.root, sid, c.writes)
 	if err != nil {
+		sid.free()
+		c.container = nil
 		return err
 	}
 	c.aclPaths = aclPaths
+	c.protectedPaths = protectedPaths
 	// The worker binary has to be startable by the container. Windows grants
 	// that in the system directories and nowhere else, so a worker beside a
 	// checkout needs to be named.
@@ -398,10 +401,11 @@ func (c *Command) takeDownBoundary() {
 	if c.container == nil {
 		return
 	}
-	cageCleanup(c.root, c.container, c.aclPaths, c.exeGrant)
+	cageCleanup(c.root, c.container, c.aclPaths, c.protectedPaths, c.exeGrant)
 	c.container.free()
 	c.container = nil
 	c.aclPaths = nil
+	c.protectedPaths = nil
 	c.exeGrant = ""
 }
 

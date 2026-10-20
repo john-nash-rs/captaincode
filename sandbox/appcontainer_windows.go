@@ -137,9 +137,12 @@ func openAppContainer() (*appContainerIdentity, error) {
 // use an allowlist: package SID deny ACEs are not a reliable way to subtract
 // access already granted elsewhere, so secret paths are never granted access.
 // It returns every path changed so cleanup removes only this run's entries.
-func cageACL(root string, sid *appContainerIdentity, writes bool) ([]string, error) {
+func cageACL(root string, sid *appContainerIdentity, writes bool) ([]string, []string, error) {
+	protected, err := protectSecretPaths(root)
+	if err != nil {
+		return nil, nil, err
+	}
 	var changed []string
-	var err error
 	if writes {
 		changed, err = grantContainerWrite(root, sid)
 	} else {
@@ -147,14 +150,16 @@ func cageACL(root string, sid *appContainerIdentity, writes bool) ([]string, err
 	}
 	if err != nil {
 		revokeContainerPaths(changed, sid)
-		return nil, err
+		unprotectPaths(protected)
+		return nil, nil, err
 	}
-	return changed, nil
+	return changed, protected, nil
 }
 
 // cageCleanup undoes whatever cageACL and grantExecutable did.
-func cageCleanup(_ string, sid *appContainerIdentity, changed []string, executableGrant string) {
+func cageCleanup(_ string, sid *appContainerIdentity, changed, protected []string, executableGrant string) {
 	revokeContainerPaths(changed, sid)
+	unprotectPaths(protected)
 	if executableGrant != "" {
 		for _, subject := range containerAccessSIDs(sid) {
 			_ = revokeEntry(executableGrant, subject)
@@ -195,7 +200,7 @@ func grantWorkspace(root string, sid *appContainerIdentity, mask windows.ACCESS_
 		changed = append(changed, path)
 		return nil
 	}
-	if err := grant(root, false); err != nil {
+	if err := grant(root, true); err != nil {
 		return changed, err
 	}
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -227,6 +232,61 @@ func grantWorkspace(root string, sid *appContainerIdentity, mask windows.ACCESS_
 		return changed, fmt.Errorf("grant workspace access: %w", err)
 	}
 	return changed, nil
+}
+
+// protectSecretPaths prevents an inheritable workspace grant from flowing
+// into the credential directories. These paths are protected only for the
+// lifetime of the worker and are returned for cleanup to restore inheritance.
+func protectSecretPaths(root string) ([]string, error) {
+	var protected []string
+	for _, name := range secretNames {
+		path := filepath.Join(root, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			unprotectPaths(protected)
+			return nil, fmt.Errorf("inspect protected path %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			unprotectPaths(protected)
+			return nil, fmt.Errorf("read access list of %s: %w", path, err)
+		}
+		control, _, err := descriptor.Control()
+		if err != nil {
+			unprotectPaths(protected)
+			return nil, fmt.Errorf("read access list of %s: %w", path, err)
+		}
+		if control&windows.SE_DACL_PROTECTED != 0 {
+			continue
+		}
+		dacl, _, err := descriptor.DACL()
+		if err != nil && !errors.Is(err, windows.ERROR_OBJECT_NOT_FOUND) {
+			unprotectPaths(protected)
+			return nil, fmt.Errorf("read access list of %s: %w", path, err)
+		}
+		if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+			windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+			nil, nil, dacl, nil); err != nil {
+			unprotectPaths(protected)
+			return nil, fmt.Errorf("protect credential path %s: %w", path, err)
+		}
+		protected = append(protected, path)
+	}
+	return protected, nil
+}
+
+func unprotectPaths(paths []string) {
+	for _, path := range paths {
+		_ = windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+			windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION,
+			nil, nil, nil, nil)
+	}
 }
 
 // secretNames are the directories inside a workspace that hold credentials and

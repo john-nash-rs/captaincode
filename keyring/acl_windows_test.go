@@ -25,7 +25,7 @@ func TestKeyFileACLGivesOnlyTheCurrentUser(t *testing.T) {
 	descriptor, err := windows.GetNamedSecurityInfo(
 		path,
 		windows.SE_FILE_OBJECT,
-		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION,
+		windows.DACL_SECURITY_INFORMATION,
 	)
 	if err != nil {
 		t.Fatal(err)

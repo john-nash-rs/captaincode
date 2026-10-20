@@ -451,7 +451,7 @@ func setContainerEntries(path string, subjects []*windows.SID, mode windows.ACCE
 func trusteeFor(sid *windows.SID) windows.TRUSTEE {
 	return windows.TRUSTEE{
 		TrusteeForm:  windows.TRUSTEE_IS_SID,
-		TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
+		TrusteeType:  windows.TRUSTEE_IS_USER,
 		TrusteeValue: windows.TrusteeValueFromSID(sid),
 	}
 }

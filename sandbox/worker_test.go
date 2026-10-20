@@ -69,8 +69,11 @@ func TestOSReadWriteBoundaries(t *testing.T) {
 		output, err := command.CombinedOutput()
 		return string(output), err
 	}
-	read := script{unix: `cat "$1"`, windows: `type "%~1"`}
-	write := script{unix: `printf changed > "$1"`, windows: `echo changed>"%~1"`}
+	// t.TempDir paths on the hosted Windows runner contain no spaces. Avoid
+	// nested quotes here: cmd.exe's /c parser does not use the C-runtime quote
+	// rules used by CreateProcess command-line composition.
+	read := script{unix: `cat "$1"`, windows: `type %~1`}
+	write := script{unix: `printf changed > "$1"`, windows: `echo changed>%~1`}
 
 	if output, err := probe(read.forPlatform(), inside); err != nil || !strings.Contains(output, "inside canary") {
 		t.Fatalf("allowed read failed: %s %v", output, err)
@@ -139,7 +142,7 @@ func TestTheCageRefusesHomeSecrets(t *testing.T) {
 		visible = "/workspace/.ssh/id_rsa"
 		control = "/workspace/readable.txt"
 	}
-	probe := script{unix: `cat "$1"`, windows: `type "%~1"`}.forPlatform()
+	probe := script{unix: `cat "$1"`, windows: `type %~1`}.forPlatform()
 	read := func(path string) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -178,7 +181,7 @@ func TestReadOnlyLeavesTheWorkspaceAlone(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		guest = "/workspace/new.txt"
 	}
-	write := script{unix: `printf changed > "$1"`, windows: `echo changed>"%~1"`}.forPlatform()
+	write := script{unix: `printf changed > "$1"`, windows: `echo changed>%~1`}.forPlatform()
 	attempt := func(writes bool) error {
 		worker := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 512, AllowWrites: writes}}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

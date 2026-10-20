@@ -31,16 +31,6 @@ import (
 // whether it is right by trying to read a file the container must not reach.
 const procThreadAttributeSecurityCapabilities = 0x00020009
 
-// procThreadAttributeAllApplicationPackagesPolicy opts the process out of
-// matching the broad ALL APPLICATION PACKAGES SID. This makes the AppContainer
-// an LPAC, so ACLs for unrelated packages cannot grant this worker access.
-// It is ProcThreadAttributeValue(15, FALSE, TRUE, FALSE) from winnt.h.
-const procThreadAttributeAllApplicationPackagesPolicy = 0x0002000f
-
-// processCreationAllApplicationPackagesOptOut is the policy value passed with
-// procThreadAttributeAllApplicationPackagesPolicy to create an LPAC.
-const processCreationAllApplicationPackagesOptOut = 0x01
-
 // diagnoseWithoutContainer makes buildLauncher start the child without the
 // container, so the diagnostic probe can tell a launch fault from a
 // containment fault in a single run. Nothing outside the diagnostic sets it.
@@ -495,11 +485,11 @@ func buildLauncher(c *Command, sid *appContainerIdentity, st *platformState) (*l
 		result.environment = &environment[0]
 	}
 
-	// Three attributes at most: the capabilities, LPAC policy and handle list. The
+	// Two attributes at most: the capabilities and handle list. The
 	// handle list matters more than usual here. The child is a container
 	// whose whole point is to have nothing, and without the list every
 	// inheritable handle in this process would be in it.
-	attributes, err := windows.NewProcThreadAttributeList(3)
+	attributes, err := windows.NewProcThreadAttributeList(2)
 	if err != nil {
 		return nil, fmt.Errorf("create startup attribute list: %w", err)
 	}
@@ -521,15 +511,6 @@ func buildLauncher(c *Command, sid *appContainerIdentity, st *platformState) (*l
 		); err != nil {
 			result.close()
 			return nil, fmt.Errorf("set appcontainer capabilities: %w", err)
-		}
-		allApplicationPackagesPolicy := uint32(processCreationAllApplicationPackagesOptOut)
-		if err := attributes.Update(
-			procThreadAttributeAllApplicationPackagesPolicy,
-			unsafe.Pointer(&allApplicationPackagesPolicy),
-			unsafe.Sizeof(allApplicationPackagesPolicy),
-		); err != nil {
-			result.close()
-			return nil, fmt.Errorf("set LPAC policy: %w", err)
 		}
 	}
 	result.inherited = st.childHandles()

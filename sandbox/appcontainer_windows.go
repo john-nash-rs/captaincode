@@ -152,7 +152,16 @@ func openAppContainer() (*appContainerIdentity, error) {
 // and the operator is left locked out of their own credentials.
 func cageACL(root string, sid *appContainerIdentity, writes bool) ([]string, error) {
 	if !writes {
-		return nil, grantContainerRead(root, sid)
+		if err := grantContainerRead(root, sid); err != nil {
+			return nil, err
+		}
+		denied, err := denyContainerWrite(root, sid)
+		if err != nil {
+			removeDenyContainerRead(denied, sid)
+			revokeContainer(root, sid)
+			return nil, err
+		}
+		return denied, nil
 	}
 	if err := grantContainerWrite(root, sid); err != nil {
 		return nil, err
@@ -226,20 +235,45 @@ func denyContainerRead(root string, sid *appContainerIdentity) ([]string, error)
 	var denied []string
 	for _, name := range secretNames {
 		path := filepath.Join(root, name)
-		info, err := os.Lstat(path)
+		_, err := os.Lstat(path)
 		if err != nil {
 			// Not present, so there is nothing to deny. Skipping is right: an
 			// entry for a path that does not exist could not be removed later
 			// from something that is not there.
 			continue
 		}
-		inherit := info.IsDir()
-		if err := setContainerEntries(path, subjects, windows.DENY_ACCESS, mask, inherit); err != nil {
-			return denied, err
+		// Rewriting a directory's inheritable ACE does not reliably update
+		// existing children on every filesystem. Deny every existing object as
+		// well, so files created before this run cannot keep an earlier allow.
+		err = filepath.WalkDir(path, func(entryPath string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			if err := setContainerEntries(entryPath, subjects, windows.DENY_ACCESS, mask, entry.IsDir()); err != nil {
+				return err
+			}
+			denied = append(denied, entryPath)
+			return nil
+		})
+		if err != nil {
+			return denied, fmt.Errorf("deny secret path %s: %w", path, err)
 		}
-		denied = append(denied, path)
 	}
 	return denied, nil
+}
+
+// denyContainerWrite denies write rights explicitly in read-only mode. The
+// ACE is inherited and also applies to the workspace directory itself, where
+// FILE_ADD_FILE is checked when the worker creates a file.
+func denyContainerWrite(root string, sid *appContainerIdentity) ([]string, error) {
+	mask := windows.ACCESS_MASK(windows.GENERIC_WRITE | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
+	if err := setContainerEntries(root, denySubjects(sid), windows.DENY_ACCESS, mask, true); err != nil {
+		return nil, err
+	}
+	return []string{root}, nil
 }
 
 // denySubjects is who a deny has to name to actually deny the container.

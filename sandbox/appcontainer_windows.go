@@ -487,13 +487,17 @@ func revokeEntry(path string, subject *windows.SID, mode windows.ACCESS_MODE) er
 	}
 	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{
 		{
-			AccessPermissions: windows.GENERIC_ALL,
+			// REVOKE_ACCESS matches permissions, rather than treating
+			// GENERIC_ALL as a wildcard. Entries written here include both
+			// generic rights and file-specific masks, so request every bit
+			// when removing this dedicated AppContainer SID's entries.
+			AccessPermissions: windows.ACCESS_MASK(0xffffffff),
 			AccessMode:        mode,
 			Inheritance:       windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 			Trustee:           trusteeFor(subject),
 		},
 		{
-			AccessPermissions: windows.GENERIC_ALL,
+			AccessPermissions: windows.ACCESS_MASK(0xffffffff),
 			AccessMode:        mode,
 			Inheritance:       windows.NO_INHERITANCE,
 			Trustee:           trusteeFor(subject),

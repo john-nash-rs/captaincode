@@ -81,12 +81,18 @@ func TestOSReadWriteBoundaries(t *testing.T) {
 	if output, err := probe(read.forPlatform(), outside); err == nil || strings.Contains(output, "outside canary") {
 		t.Fatalf("outside read succeeded: %s", output)
 	}
-	if output, err := probe(write.forPlatform(), newFile); err == nil {
-		t.Fatalf("read-only write succeeded: %s", output)
+	output, err := probe(write.forPlatform(), newFile)
+	// cmd.exe can report success even when its redirection was denied, so
+	// verify the filesystem effect as well as the process exit status.
+	if _, statErr := os.Stat(filepath.Join(root, "new.txt")); statErr == nil {
+		t.Fatalf("read-only write created a file: %s (command error: %v)", output, err)
 	}
 	worker.Registry.AllowWrites = true
 	if output, err := probe(write.forPlatform(), newFile); err != nil {
 		t.Fatalf("allowed write failed: %s %v", output, err)
+	}
+	if output, err := probe(read.forPlatform(), newFile); err != nil || !strings.Contains(output, "changed") {
+		t.Fatalf("the worker could not read its allowed write: %s %v", output, err)
 	}
 	if output, err := probe(write.forPlatform(), outside); err == nil {
 		t.Fatalf("outside write succeeded: %s", output)

@@ -183,18 +183,11 @@ func cageCleanup(root string, sid *appContainerIdentity, denied []string, execut
 // containerAccessSIDs is the set of identities an access entry is written
 // against.
 //
-// Naming the container's own SID is necessary and not sufficient. Windows adds
-// the package groups to an AppContainer's token, and an access check succeeds
-// if any of the identities resolves it. For a grant that is convenient — it is
-// why the system's own directories work without per-container entries — and
-// for a deny it is essential, because a deny that named only the container SID
-// would be satisfied through one of the groups instead.
+// Only the container's own SID is granted access to the workspace. Granting
+// ALL APPLICATION PACKAGES here would let the worker use that broad group to
+// bypass the per-container denies on .ssh and other secrets.
 func containerAccessSIDs(sid *appContainerIdentity) []*windows.SID {
-	sids := []*windows.SID{sid.sid}
-	if anyPackage, err := windows.CreateWellKnownSid(windows.WinBuiltinAnyPackageSid); err == nil {
-		sids = append(sids, anyPackage)
-	}
-	return sids
+	return []*windows.SID{sid.sid}
 }
 
 // grantContainerRead names the container, and only the container, in the
@@ -209,12 +202,9 @@ func grantContainerRead(root string, sid *appContainerIdentity) error {
 
 // grantContainerWrite widens the workspace to modification for the container.
 //
-// The package groups are named alongside it. A container's own SID appears in
-// a directory's list only when the write hole has to be cut for this run, and
-// the integrity label is what makes creating a file possible; entries written
-// against the individual SID are not inherited by files a tool creates, so a
-// newly written file would be its own without them. Naming the groups is what
-// makes the new file readable by the process that wrote it.
+// The grant is scoped to this container's SID and inherited by files it
+// creates. A grant to ALL APPLICATION PACKAGES would also cover the secret
+// directories below this workspace and would defeat their explicit denies.
 func grantContainerWrite(root string, sid *appContainerIdentity) error {
 	return setContainerEntries(root, containerAccessSIDs(sid), windows.GRANT_ACCESS, windows.GENERIC_ALL, true)
 }
@@ -255,12 +245,9 @@ func denyContainerRead(root string, sid *appContainerIdentity) ([]string, error)
 // denySubjects is who a deny has to name to actually deny the container.
 //
 // Only the container's own SID, and deliberately neither the operator's user
-// SID nor the all-packages group. An AppContainer access check is the
-// intersection of two checks: the ordinary one against the user and group
-// SIDs, and a second against the package and capability SIDs. A container
-// reaches a file only when both grant, so a file that names the container in
-// no allow entry is already closed to it no matter what the operator's own
-// SIDs permit.
+// SID nor the all-packages group. A workspace grant to a shared package group
+// would authorize every AppContainer and could override these per-container
+// boundaries.
 //
 // That is why a user-SID deny is worse than useless here. It would not be
 // what makes the deny bind — the missing container grant is — and it would
@@ -268,11 +255,8 @@ func denyContainerRead(root string, sid *appContainerIdentity) ([]string, error)
 // removeDenyContainerRead, so a run that died before cleanup would leave the
 // operator locked out of their own .ssh.
 //
-// The all-packages group is left out for the opposite reason: denying it
-// would reach every AppContainer on the machine, including ones that have
-// nothing to do with this harness. A deny that names only the container's own
-// SID is precise, and costs nothing if it outlives its run, because the
-// operator does not hold that SID.
+// A deny that names only the container's own SID is precise, and costs nothing
+// if it outlives its run, because the operator does not hold that SID.
 func denySubjects(sid *appContainerIdentity) []*windows.SID {
 	return []*windows.SID{sid.sid}
 }

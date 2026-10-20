@@ -131,6 +131,21 @@ type Envelope struct {
 	Call     core.Call        `json:"call"`
 }
 
+// HasBackend reports whether this platform has an isolation backend.
+//
+// It is the single answer to that question, used by Command to refuse, by
+// doctor to report, and by the tests that exercise real OS enforcement to
+// decide whether they can run at all. Duplicating the list of platforms in
+// each place is how a new backend arrives and one of the three keeps saying
+// it does not exist.
+func HasBackend() bool {
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		return true
+	}
+	return false
+}
+
 func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, error) {
 	root, err := filepath.EvalSymlinks(w.Registry.Root)
 	if err != nil {

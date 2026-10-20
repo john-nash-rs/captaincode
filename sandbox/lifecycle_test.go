@@ -14,7 +14,21 @@ import (
 	"github.com/john-nash-rs/captaincode/toolbox"
 )
 
+// requireBackend skips a test on a platform with no isolation backend.
+//
+// The tests below probe real OS enforcement. Without a backend there is
+// nothing to enforce, and they would do no more than assert that the refusal
+// names a path that does not exist on this platform. Skipping is the honest
+// report; running would be a green or red that means nothing.
+func requireBackend(t *testing.T) {
+	t.Helper()
+	if !HasBackend() {
+		t.Skipf("no sandbox backend on %s", runtime.GOOS)
+	}
+}
+
 func TestOSNetworkAndEnvironmentBoundary(t *testing.T) {
+	requireBackend(t)
 	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
 		t.Skip("OS probes require explicit opt-in")
 	}
@@ -44,6 +58,7 @@ func TestOSNetworkAndEnvironmentBoundary(t *testing.T) {
 }
 
 func TestOSCancellationStopsHeartbeat(t *testing.T) {
+	requireBackend(t)
 	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
 		t.Skip("OS probes require explicit opt-in")
 	}

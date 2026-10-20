@@ -20,6 +20,7 @@ func TestUnavailableSandboxFailsClosed(t *testing.T) {
 	}
 }
 func TestOSReadWriteBoundaries(t *testing.T) {
+	requireBackend(t)
 	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
 		t.Skip("set CAPTAINCODE_SANDBOX_TEST=1 for actual OS enforcement probes")
 	}

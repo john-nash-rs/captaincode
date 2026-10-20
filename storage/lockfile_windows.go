@@ -4,59 +4,43 @@ package storage
 
 import (
 	"os"
-	"syscall"
-	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
-var (
-	modkernel32      = syscall.NewLazyDLL("kernel32.dll")
-	procLockFileEx   = modkernel32.NewProc("LockFileEx")
-	procUnlockFileEx = modkernel32.NewProc("UnlockFileEx")
-)
-
-// lockFileEx wraps LockFileEx, which is the Windows equivalent of flock.
-type lockFileEx struct {
-	Offset     uint32
-	LengthLow  uint32
-	LengthHigh uint32
-	Reserved   uint32
-	Flags      uint32
-	Reserved2  uint32
-}
-
-// LOCKFILE_EXCLUSIVE_LOCK is 0x2. The FAIL_IMMEDIATELY flag is what turns a
-// contended lock into an error instead of a wait: the harness refuses to share
-// a database, and blocking would hang the second process with no way to tell
-// what it is waiting for.
+// LOCKFILE_EXCLUSIVE_LOCK takes the lock for this process alone, and
+// LOCKFILE_FAIL_IMMEDIATELY turns a contended lock into an error instead of a
+// wait: the harness refuses to share a database, and blocking would hang the
+// second process with no way to tell what it is waiting for.
 const (
-	lockfileExclusiveLock   = 0x00000002
-	lockfileFailImmediately = 0x00000001
-	wholeFileLow            = ^uint32(0)
-	wholeFileHigh           = ^uint32(0)
+	lockfileExclusiveLock   = windows.LOCKFILE_EXCLUSIVE_LOCK
+	lockfileFailImmediately = windows.LOCKFILE_FAIL_IMMEDIATELY
+	// wholeFile is the length of the range to lock, given twice because the
+	// API splits it into a low and a high dword. Both all-ones is the whole
+	// file from any offset.
+	wholeFile = ^uint32(0)
 )
 
 // lockExclusive takes a whole-file exclusive lock, failing at once if held.
+//
+// The range is named by the overlapped structure, which for a synchronous lock
+// is consulted only for its offset, and the length is the pair of arguments
+// before it. Getting either wrong does not fail loudly: a lock on the wrong
+// region succeeds, and the second process is then allowed in.
 func lockExclusive(file *os.File) error {
-	request := lockFileEx{
-		LengthLow:  wholeFileLow,
-		LengthHigh: wholeFileHigh,
-		Flags:      lockfileExclusiveLock | lockfileFailImmediately,
-	}
-	result, _, callErr := procLockFileEx.Call(
-		file.Fd(),
-		uintptr(request.Flags),
+	var overlapped windows.Overlapped
+	return windows.LockFileEx(
+		windows.Handle(file.Fd()),
+		lockfileExclusiveLock|lockfileFailImmediately,
 		0,
-		uintptr(unsafe.Pointer(&request)),
+		wholeFile, wholeFile,
+		&overlapped,
 	)
-	if result == 0 {
-		return callErr
-	}
-	return nil
 }
 
 // unlockExclusive releases a lock taken by lockExclusive. It runs from the
 // deferred close path, so a failure here is not actionable.
 func unlockExclusive(file *os.File) {
-	request := lockFileEx{LengthLow: wholeFileLow, LengthHigh: wholeFileHigh}
-	procUnlockFileEx.Call(file.Fd(), 0, uintptr(unsafe.Pointer(&request)))
+	var overlapped windows.Overlapped
+	windows.UnlockFileEx(windows.Handle(file.Fd()), 0, wholeFile, wholeFile, &overlapped)
 }

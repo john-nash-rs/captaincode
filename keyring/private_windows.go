@@ -4,7 +4,6 @@ package keyring
 
 import (
 	"os"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -35,6 +34,12 @@ func private(path string, mode os.FileMode) error {
 	// system accounts Windows needs to manage the file. Everyone else is
 	// denied by the absence of an entry, which is what a protected list with
 	// no inheritance gives.
+	//
+	// The list returned here lives on the Go heap: ACLFromEntries copies it
+	// out of the Windows heap and frees that itself. It must not be handed to
+	// LocalFree, which is what the Windows heap allocator expects and the Go
+	// allocator does not provide; doing so corrupts the heap and takes the
+	// process down with a heap-corruption exit long after this call returns.
 	rights := accessFor(mode)
 	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{
 		grant(rights, user),
@@ -43,9 +48,6 @@ func private(path string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	// SetEntriesInAcl allocates the list from the process heap, and the
-	// standard library will not free it.
-	defer windows.LocalFree(windows.Handle(unsafe.Pointer(acl)))
 
 	return windows.SetNamedSecurityInfo(
 		path,

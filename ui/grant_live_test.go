@@ -46,6 +46,12 @@ func TestGrantMidSessionProducesARealFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("exercises the real sandbox")
 	}
+	// These tests exist to watch the real OS hold a line. On a platform with
+	// no isolation backend there is no line to hold, and the worker's refusal
+	// would be mistaken for a boundary.
+	if !sandbox.HasBackend() {
+		t.Skip("no sandbox backend on this platform")
+	}
 	executable := buildRealBinary(t)
 	workspace := t.TempDir()
 
@@ -87,6 +93,12 @@ func TestGrantedSessionWritesContentThroughTheSandbox(t *testing.T) {
 	if testing.Short() {
 		t.Skip("exercises the real sandbox")
 	}
+	// These tests exist to watch the real OS hold a line. On a platform with
+	// no isolation backend there is no line to hold, and the worker's refusal
+	// would be mistaken for a boundary.
+	if !sandbox.HasBackend() {
+		t.Skip("no sandbox backend on this platform")
+	}
 	executable := buildRealBinary(t)
 	workspace := t.TempDir()
 	worker := sandbox.Worker{
@@ -113,6 +125,12 @@ func TestGrantedSessionWritesContentThroughTheSandbox(t *testing.T) {
 func TestGrantedSessionCannotEscapeTheWorkspace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("exercises the real sandbox")
+	}
+	// These tests exist to watch the real OS hold a line. On a platform with
+	// no isolation backend there is no line to hold, and the worker's refusal
+	// would be mistaken for a boundary.
+	if !sandbox.HasBackend() {
+		t.Skip("no sandbox backend on this platform")
 	}
 	executable := buildRealBinary(t)
 	workspace := t.TempDir()

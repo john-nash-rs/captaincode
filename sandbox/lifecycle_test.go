@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,12 +50,70 @@ func shellFor(t *testing.T) string {
 }
 
 // shellRun is the argv that runs one script string under shellFor.
+//
+// The two shells do not take arguments the same way, and the difference is
+// not a detail. `sh -c script name arg` binds `$0` to name and `$1` upwards to
+// the arguments that follow, which is why the Unix scripts can read a path as
+// `"$1"`. `cmd /c` has no such binding: it is documented that batch parameters
+// do not exist at the command line, so a script run through /c sees `%1` as an
+// empty string, and every probe that passed a path that way was really running
+// a command with a missing argument. On Windows the arguments are therefore
+// substituted into the script before cmd ever reads it, which is why the
+// Windows scripts here also spell their placeholder `%~1`.
 func shellRun(t *testing.T, program, script string, args ...string) []string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		return append([]string{"/c", script}, args...)
+		return []string{"/c", substituteWindowsArgs(script, args)}
 	}
 	return append([]string{"-c", script, program}, args...)
+}
+
+// substituteWindowsArgs replaces `%1`, `%2` … and their `%~` forms with the
+// arguments, because cmd has no way to bind them itself at the command line.
+//
+// It is separate from shellRun so it can be tested on every platform: the
+// branch it belongs to only runs on Windows, and a rule that is only ever
+// exercised on one operating system is a rule that is wrong on two.
+func substituteWindowsArgs(script string, args []string) string {
+	for i := len(args); i >= 1; i-- {
+		// The value substitutes bare: the Windows scripts carry their own
+		// quoting around the placeholder (`"%~1"`), exactly as the Unix ones
+		// do (`"$1"`), so adding quotes here would double them.
+		value := args[i-1]
+		// The tilde form is replaced first so its own `%1` is not caught by
+		// the plain rule.
+		script = strings.ReplaceAll(script, fmt.Sprintf("%%~%d", i), value)
+		script = strings.ReplaceAll(script, fmt.Sprintf("%%%d", i), value)
+	}
+	return script
+}
+
+// The probes lean on substituteWindowsArgs being exact, and it runs on
+// platforms this test can execute even though its caller's branch only runs on
+// Windows. A doubled quote or an unsubstituted placeholder is a command that
+// fails for a reason that has nothing to do with the boundary under test,
+// which is the failure mode that produced this helper in the first place.
+func TestSubstituteWindowsArgs(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+		args   []string
+		want   string
+	}{
+		{"read probe", `type "%~1"`, []string{`C:\t\inside.txt`}, `type "C:\t\inside.txt"`},
+		{"write probe", `echo changed>"%~1"`, []string{`C:\t\new.txt`}, `echo changed>"C:\t\new.txt"`},
+		{"path with a space", `type "%~1"`, []string{`C:\a b\x.txt`}, `type "C:\a b\x.txt"`},
+		{"plain form", `echo x>>"%1"`, []string{`C:\t\h`}, `echo x>>"C:\t\h"`},
+		{"second argument", `echo %1 %2`, []string{"one", "two"}, "echo one two"},
+		{"no arguments", `type "%~1"`, nil, `type "%~1"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := substituteWindowsArgs(c.script, c.args); got != c.want {
+				t.Fatalf("got %q, want %q", got, c.want)
+			}
+		})
+	}
 }
 
 func TestOSNetworkAndEnvironmentBoundary(t *testing.T) {

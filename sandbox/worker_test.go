@@ -120,6 +120,13 @@ func TestTheCageRefusesHomeSecrets(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("secret canary"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// A file the worker is allowed to read, for the same reasons as the
+	// positive control below: without it this test passes just as happily
+	// when the worker cannot run at all, which is the failure it exists to
+	// catch a version of.
+	if err := os.WriteFile(filepath.Join(root, "readable.txt"), []byte("public canary"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	// Writes on, which is the mode that has to widen the workspace and is
 	// therefore the mode where the deny is load-bearing.
 	worker := Worker{
@@ -127,20 +134,29 @@ func TestTheCageRefusesHomeSecrets(t *testing.T) {
 		Registry:   toolbox.Registry{Root: root, MaxBytes: 512, AllowWrites: true},
 	}
 	visible := secret
+	control := filepath.Join(root, "readable.txt")
 	if runtime.GOOS == "linux" {
 		visible = "/workspace/.ssh/id_rsa"
+		control = "/workspace/readable.txt"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	command, err := worker.Command(ctx, shellRun(t, "probe", script{
-		unix:    `cat "$1"`,
-		windows: `type "%~1"`,
-	}.forPlatform(), visible))
-	if err != nil {
-		t.Fatal(err)
+	probe := script{unix: `cat "$1"`, windows: `type "%~1"`}.forPlatform()
+	read := func(path string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		command, err := worker.Command(ctx, shellRun(t, "probe", probe, path))
+		if err != nil {
+			return "", err
+		}
+		output, err := command.CombinedOutput()
+		return string(output), err
 	}
-	output, _ := command.CombinedOutput()
-	if strings.Contains(string(output), "secret canary") {
+	// The control first. A read that is supposed to work proves the worker
+	// can start, can reach the workspace, and can use the shell; only then
+	// does a read that fails mean the deny is what stopped it.
+	if output, err := read(control); err != nil || !strings.Contains(output, "public canary") {
+		t.Fatalf("the worker could not read a file it is allowed to read, so this test cannot tell a denial from a broken worker:\n%s%v", output, err)
+	}
+	if output, _ := read(visible); strings.Contains(output, "secret canary") {
 		t.Fatalf("the worker read a credential inside the workspace:\n%s", output)
 	}
 }
@@ -154,18 +170,34 @@ func TestReadOnlyLeavesTheWorkspaceAlone(t *testing.T) {
 	}
 	root := t.TempDir()
 	target := filepath.Join(root, "new.txt")
-	worker := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 512}}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	command, err := worker.Command(ctx, shellRun(t, "probe", script{
-		unix:    `printf changed > "$1"`,
-		windows: `echo changed>"%~1"`,
-	}.forPlatform(), target))
-	if err != nil {
-		t.Fatal(err)
+	write := script{unix: `printf changed > "$1"`, windows: `echo changed>"%~1"`}.forPlatform()
+	attempt := func(writes bool) error {
+		worker := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 512, AllowWrites: writes}}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		command, err := worker.Command(ctx, shellRun(t, "probe", write, target))
+		if err != nil {
+			return err
+		}
+		_, err = command.CombinedOutput()
+		return err
 	}
-	command.CombinedOutput()
+
+	if err := attempt(false); err == nil {
+		t.Fatal("a read-only worker wrote a file without error")
+	}
 	if _, err := os.Stat(target); err == nil {
 		t.Fatal("a read-only worker created a file")
+	}
+	// The positive control. Without it this test would pass on a machine
+	// where the worker cannot run at all, because a command that never
+	// starts also never creates the file. Turning writes on and watching the
+	// same shell succeed is what makes the refusal above mean "the sandbox
+	// stopped it" rather than "nothing happened".
+	if err := attempt(true); err != nil {
+		t.Fatalf("the same write succeeded once writes were allowed, so the refusal above was not the sandbox's:\n%v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("writes were allowed but no file appeared: %v", err)
 	}
 }

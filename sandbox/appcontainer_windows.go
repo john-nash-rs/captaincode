@@ -205,7 +205,7 @@ func grantContainerRead(root string, sid *appContainerIdentity) error {
 	// Read and execute, plus the synchronize bit. Opening a directory for
 	// traversal is a separate right and a tool that cannot open its own
 	// working directory reports the whole workspace as missing.
-	mask := windows.ACCESS_MASK(windows.GENERIC_READ | windows.GENERIC_EXECUTE)
+	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_EXECUTE)
 	return setContainerEntries(root, []*windows.SID{sid.sid}, windows.GRANT_ACCESS, mask, true)
 }
 
@@ -230,7 +230,7 @@ var secretNames = []string{".git", ".env", ".ssh", ".aws", ".codex"}
 // the paths it actually denied.
 func denyContainerRead(root string, sid *appContainerIdentity) ([]string, error) {
 	subjects := denySubjects(sid)
-	mask := windows.ACCESS_MASK(windows.GENERIC_READ | windows.GENERIC_WRITE | windows.GENERIC_EXECUTE |
+	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE |
 		windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
 	var denied []string
 	for _, name := range secretNames {
@@ -269,7 +269,7 @@ func denyContainerRead(root string, sid *appContainerIdentity) ([]string, error)
 // ACE is inherited and also applies to the workspace directory itself, where
 // FILE_ADD_FILE is checked when the worker creates a file.
 func denyContainerWrite(root string, sid *appContainerIdentity) ([]string, error) {
-	mask := windows.ACCESS_MASK(windows.GENERIC_WRITE | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
+	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_WRITE | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
 	if err := setContainerEntries(root, denySubjects(sid), windows.DENY_ACCESS, mask, true); err != nil {
 		return nil, err
 	}
@@ -338,7 +338,7 @@ func grantExecutable(executable string, sid *appContainerIdentity) (string, erro
 		return "", nil
 	}
 	if err := setContainerEntries(directory, []*windows.SID{sid.sid}, windows.GRANT_ACCESS,
-		windows.GENERIC_READ|windows.GENERIC_EXECUTE, true); err != nil {
+		windows.FILE_GENERIC_READ|windows.FILE_GENERIC_EXECUTE, true); err != nil {
 		return "", err
 	}
 	return directory, nil

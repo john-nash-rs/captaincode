@@ -10,6 +10,7 @@ import (
 
 	"github.com/john-nash-rs/captaincode/internal/testenv"
 	"github.com/john-nash-rs/captaincode/keyring"
+	"github.com/john-nash-rs/captaincode/sandbox"
 )
 
 // THE JOURNEY, OFFLINE, AGAINST THE REAL BINARY.
@@ -131,6 +132,13 @@ func (j *journey) mustRun(args ...string) string {
 
 // A new user can reach a working setup using only what the tool tells them.
 func TestJourneyFirstRunToWorkingSetup(t *testing.T) {
+	// The answer is read from the project by the read_file tool, and every
+	// tool call goes through the isolation backend. Where there is none, the
+	// chain this walks does not exist yet, and a pass here would be a pass
+	// through a refusal.
+	if !sandbox.HasBackend() {
+		t.Skipf("no sandbox backend on %s", runtime.GOOS)
+	}
 	j := newJourney(t)
 
 	// 1. Nothing is configured. The run must still start and say what is wrong.
@@ -232,6 +240,12 @@ func TestJourneyWrongDirectoryIsExplained(t *testing.T) {
 // Two harness processes must not fight over one database. The refusal has to
 // name the path, or it reads as the settings being lost.
 func TestJourneySecondProcessIsRefusedClearly(t *testing.T) {
+	// A second process that answered would be indistinguishable here from one
+	// that was refused, so the answer itself has to be reachable, which needs
+	// the backend.
+	if !sandbox.HasBackend() {
+		t.Skipf("no sandbox backend on %s", runtime.GOOS)
+	}
 	j := newJourney(t)
 	args := []string{j.work, "--ide=false", "--db", j.db, "--provider", journeyProvider,
 		"--question", "what is the project version?"}

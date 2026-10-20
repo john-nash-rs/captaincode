@@ -27,6 +27,11 @@ func TestWorkerHasExpectedAppContainerIdentity(t *testing.T) {
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if command.state != nil && command.state.process != 0 {
+			_ = command.Wait()
+		}
+	}()
 	var token windows.Token
 	if err := windows.OpenProcessToken(windows.Handle(command.state.process), windows.TOKEN_QUERY, &token); err != nil {
 		t.Fatal(err)
@@ -40,15 +45,17 @@ func TestWorkerHasExpectedAppContainerIdentity(t *testing.T) {
 	if isAppContainer == 0 {
 		t.Fatal("worker token is not an AppContainer token")
 	}
-	type appContainerInfo struct{ sid *windows.SID }
-	var info appContainerInfo
-	if err := windows.GetTokenInformation(token, 31, (*byte)(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), &returned); err != nil {
+	// TokenAppContainerSid returns a TOKEN_APPCONTAINER_INFORMATION. Use a
+	// generously sized buffer because Windows may include trailing data.
+	info := make([]uintptr, 16)
+	if err := windows.GetTokenInformation(token, 31, (*byte)(unsafe.Pointer(&info[0])), uint32(len(info)*int(unsafe.Sizeof(info[0]))), &returned); err != nil {
 		t.Fatal(err)
 	}
-	if info.sid == nil {
+	sid := *(**windows.SID)(unsafe.Pointer(&info[0]))
+	if sid == nil {
 		t.Fatal("worker token has no AppContainer SID")
 	}
-	actual := info.sid.String()
+	actual := sid.String()
 	expected := command.container.sid.String()
 	if actual != expected {
 		t.Errorf("worker AppContainer SID %s differs from ACL SID %s", actual, expected)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/john-nash-rs/captaincode/config"
 	"github.com/john-nash-rs/captaincode/keyring"
+	"github.com/john-nash-rs/captaincode/sandbox"
 )
 
 // check is one diagnostic result.
@@ -108,18 +109,13 @@ func platformCheck() check {
 	switch runtime.GOOS {
 	case "darwin", "linux":
 	case "windows":
-		// The binary builds and the database lock works here, but there is no
-		// isolation backend, so tools cannot run. Saying "ok" would be the one
-		// thing worse than not building at all.
-		c.Status = "fail"
-		c.Detail = "windows builds, but has no sandbox backend yet"
-		c.Fix = "Talking to a model works on Windows.\n" +
-			"      Running tools does not: there is no isolation backend, and\n" +
-			"      CaptainCode refuses to execute tools unsandboxed."
+		// The sandbox check below reports whether the container is usable, so
+		// this one does not have to guess. Windows is supported; the question
+		// that matters is answered where the answer is measurable.
 	default:
 		c.Status = "fail"
 		c.Detail = runtime.GOOS + " is not supported"
-		c.Fix = "CaptainCode supports macOS and Linux; Windows is partial."
+		c.Fix = "CaptainCode supports macOS, Linux and Windows."
 	}
 	return c
 }
@@ -142,9 +138,24 @@ func sandboxCheck(cfg config.Config) check {
 		name = "sandbox-exec"
 	case "linux":
 		name = "bubblewrap"
+	case "windows":
+		name = "appcontainer"
 	}
 
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+	if runtime.GOOS == "windows" {
+		// The Windows backend has no binary to look for; it is a facility of
+		// the OS, present from Windows 8 onwards. What it can fail on is the
+		// container itself being unavailable, and that is worth reporting
+		// before the first tool call rather than after it.
+		if !sandbox.HasBackend() {
+			return check{Name: name, Status: "fail",
+				Detail: "the AppContainer facility is unavailable on this Windows version",
+				Fix: "CaptainCode refuses to run tools without isolation.\n" +
+					"      Talking to a model still works."}
+		}
+		return check{Name: name, Status: "ok", Detail: "AppContainer"}
+	}
+	if !sandbox.HasBackend() {
 		return check{Name: name, Status: "fail", Detail: "no sandbox backend on this platform"}
 	}
 

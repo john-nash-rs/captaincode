@@ -142,11 +142,24 @@ func HasBackend() bool {
 	switch runtime.GOOS {
 	case "darwin", "linux":
 		return true
+	case "windows":
+		// Windows isolates through an AppContainer, which exists from Windows 8
+		// onwards. An older machine is refused here rather than being handed an
+		// unsandboxed worker, which is the same refusal a platform with no
+		// backend at all gets.
+		return appContainerAvailable()
 	}
 	return false
 }
 
-func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, error) {
+// Command prepares an isolated worker process.
+//
+// The result is a Command rather than an os/exec.Cmd because Windows chooses
+// the container at creation time through an attribute list that os/exec has no
+// way to pass. The three backends differ in more than their flags, but they
+// agree on what the caller sees: a process that runs one tool call, under
+// restrictions that are still in force when it exits.
+func (w Worker) Command(ctx context.Context, workerArgs []string) (*Command, error) {
 	root, err := filepath.EvalSymlinks(w.Registry.Root)
 	if err != nil {
 		return nil, err
@@ -171,8 +184,7 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 	if filepath.Dir(root) == root {
 		return nil, errors.New("workspace cannot be the filesystem root")
 	}
-	var command *exec.Cmd
-	// Resolved once, here, and used by both backends.
+	// Resolved once, here, and used by every backend.
 	//
 	// Reading the Registry's startup fields instead meant a grant given from
 	// the interface changed the advertised tool list and the policy check, but
@@ -181,6 +193,7 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 	// reads as "the system did not allow it", which is exactly the report.
 	registry := w.registry()
 
+	var command *Command
 	switch runtime.GOOS {
 	case "darwin":
 		binary := w.SandboxBinary
@@ -197,7 +210,7 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 		// to the operator as "the system did not allow it".
 		profile := DarwinProfile(root, executable, registry.AllowWrites)
 		args := append([]string{"-p", profile, executable}, workerArgs...)
-		command = exec.CommandContext(ctx, binary, args...)
+		command = &Command{ctx: ctx, path: binary, args: args}
 	case "linux":
 		binary := w.SandboxBinary
 		if binary == "" {
@@ -231,13 +244,25 @@ func (w Worker) Command(ctx context.Context, workerArgs []string) (*exec.Cmd, er
 		}
 		args = append(args, "--ro-bind", executable, "/captaincode", "--chdir", "/workspace", "--", "/captaincode")
 		args = append(args, workerArgs...)
-		command = exec.CommandContext(ctx, binary, args...)
+		command = &Command{ctx: ctx, path: binary, args: args}
+	case "windows":
+		// Nothing is spelled on the command line. The container is chosen by
+		// the attribute list Start builds, and the workspace boundary is
+		// access entries placed on the directory itself, which is why the
+		// decision has to reach the Command rather than being applied here.
+		args := append([]string{executable}, workerArgs...)
+		command = &Command{
+			ctx:    ctx,
+			path:   executable,
+			args:   args,
+			root:   root,
+			writes: registry.AllowWrites,
+		}
 	default:
-		return nil, errors.New("sandbox worker supports macOS and Linux only")
+		return nil, errors.New("sandbox worker supports macOS, Linux and Windows only")
 	}
 	command.Env = workerEnv()
 	command.Dir = root
-	isolate(command)
 	command.WaitDelay = 2 * time.Second
 	return command, nil
 }

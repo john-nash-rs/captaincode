@@ -2,23 +2,42 @@ package sandbox
 
 import (
 	"context"
-	"github.com/john-nash-rs/captaincode/core"
-	"github.com/john-nash-rs/captaincode/toolbox"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/john-nash-rs/captaincode/core"
+	"github.com/john-nash-rs/captaincode/toolbox"
 )
 
 func TestUnavailableSandboxFailsClosed(t *testing.T) {
-	worker := Worker{Executable: "/bin/sh", SandboxBinary: "/definitely-missing-sandbox", Registry: toolbox.Registry{Root: t.TempDir(), MaxBytes: 512}}
+	worker := Worker{
+		Executable:    "/bin/sh",
+		SandboxBinary: "/definitely-missing-sandbox",
+		Registry:      toolbox.Registry{Root: t.TempDir(), MaxBytes: 512},
+	}
 	result := worker.Execute(context.Background(), core.Call{Name: "read_file", Arguments: []byte(`{"path":"package.json"}`)})
 	if result.OK || result.Code != "sandbox_unavailable" {
 		t.Fatal(result)
 	}
 }
+
+// THE BOUNDARY, MEASURED RATHER THAN DESCRIBED.
+//
+// Everything else in this package checks a decision. This one checks the
+// result: a real program, started the way a tool call starts one, trying to
+// read outside the workspace, to write inside it without permission, and to
+// write outside it with permission. Each attempt reports what the operating
+// system did.
+//
+// It is written to run on all three platforms on purpose. The macOS and Linux
+// backends are command lines that this package builds and the test can read;
+// the Windows backend is a container the process is born into, and nothing
+// readable describes it. The only way to know the container is real is to make
+// something try to escape it.
 func TestOSReadWriteBoundaries(t *testing.T) {
 	requireBackend(t)
 	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
@@ -26,39 +45,127 @@ func TestOSReadWriteBoundaries(t *testing.T) {
 	}
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")
-	os.WriteFile(outside, []byte("outside canary"), 0600)
-	os.WriteFile(filepath.Join(root, "inside.txt"), []byte("inside canary"), 0600)
-	worker := Worker{Executable: "/bin/sh", Registry: toolbox.Registry{Root: root, MaxBytes: 512}}
+	if err := os.WriteFile(outside, []byte("outside canary"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "inside.txt"), []byte("inside canary"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	worker := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 512}}
 	inside := filepath.Join(root, "inside.txt")
 	newFile := filepath.Join(root, "new.txt")
 	if runtime.GOOS == "linux" {
+		// The Linux backend mounts the workspace at a fixed path.
 		inside = "/workspace/inside.txt"
 		newFile = "/workspace/new.txt"
 	}
-	probe := func(script, path string) (string, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	probe := func(script string, args ...string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		command, err := worker.Command(ctx, []string{"-c", script, "probe", path})
+		command, err := worker.Command(ctx, shellRun(t, "probe", script, args...))
 		if err != nil {
 			return "", err
 		}
 		output, err := command.CombinedOutput()
 		return string(output), err
 	}
-	if output, err := probe(`cat "$1"`, inside); err != nil || !strings.Contains(output, "inside canary") {
+	read := script{unix: `cat "$1"`, windows: `type "%~1"`}
+	write := script{unix: `printf changed > "$1"`, windows: `echo changed>"%~1"`}
+
+	if output, err := probe(read.forPlatform(), inside); err != nil || !strings.Contains(output, "inside canary") {
 		t.Fatalf("allowed read failed: %s %v", output, err)
 	}
-	if output, err := probe(`cat "$1"`, outside); err == nil || strings.Contains(output, "outside canary") {
-		t.Fatal("outside read succeeded", output)
+	if output, err := probe(read.forPlatform(), outside); err == nil || strings.Contains(output, "outside canary") {
+		t.Fatalf("outside read succeeded: %s", output)
 	}
-	if _, err := probe(`printf changed > "$1"`, newFile); err == nil {
-		t.Fatal("read-only write succeeded")
+	if output, err := probe(write.forPlatform(), newFile); err == nil {
+		t.Fatalf("read-only write succeeded: %s", output)
 	}
 	worker.Registry.AllowWrites = true
-	if output, err := probe(`printf changed > "$1"`, newFile); err != nil {
-		t.Fatal("allowed write failed", output, err)
+	if output, err := probe(write.forPlatform(), newFile); err != nil {
+		t.Fatalf("allowed write failed: %s %v", output, err)
 	}
-	if _, err := probe(`printf changed > "$1"`, outside); err == nil {
-		t.Fatal("outside write succeeded")
+	if output, err := probe(write.forPlatform(), outside); err == nil {
+		t.Fatalf("outside write succeeded: %s", output)
+	}
+}
+
+// script is one probe in the two dialects the platforms' shells speak. Keeping
+// both in one value is what stops the Windows half from drifting away from the
+// assertion it is supposed to satisfy.
+type script struct {
+	unix    string
+	windows string
+}
+
+func (s script) forPlatform() string {
+	if runtime.GOOS == "windows" {
+		return s.windows
+	}
+	return s.unix
+}
+
+// secrets that live inside a workspace must stay unreadable even when writes
+// are on, because turning writes on is not a decision to hand over a key.
+func TestTheCageRefusesHomeSecrets(t *testing.T) {
+	requireBackend(t)
+	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
+		t.Skip("set CAPTAINCODE_SANDBOX_TEST=1 for actual OS enforcement probes")
+	}
+	root := t.TempDir()
+	secret := filepath.Join(root, ".ssh", "id_rsa")
+	if err := os.MkdirAll(filepath.Dir(secret), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secret, []byte("secret canary"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Writes on, which is the mode that has to widen the workspace and is
+	// therefore the mode where the deny is load-bearing.
+	worker := Worker{
+		Executable: shellFor(t),
+		Registry:   toolbox.Registry{Root: root, MaxBytes: 512, AllowWrites: true},
+	}
+	visible := secret
+	if runtime.GOOS == "linux" {
+		visible = "/workspace/.ssh/id_rsa"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	command, err := worker.Command(ctx, shellRun(t, "probe", script{
+		unix:    `cat "$1"`,
+		windows: `type "%~1"`,
+	}.forPlatform(), visible))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, _ := command.CombinedOutput()
+	if strings.Contains(string(output), "secret canary") {
+		t.Fatalf("the worker read a credential inside the workspace:\n%s", output)
+	}
+}
+
+// A read-only worker must not be able to write, and the workspace it was
+// pointed at must be exactly as it was found.
+func TestReadOnlyLeavesTheWorkspaceAlone(t *testing.T) {
+	requireBackend(t)
+	if os.Getenv("CAPTAINCODE_SANDBOX_TEST") != "1" {
+		t.Skip("set CAPTAINCODE_SANDBOX_TEST=1 for actual OS enforcement probes")
+	}
+	root := t.TempDir()
+	target := filepath.Join(root, "new.txt")
+	worker := Worker{Executable: shellFor(t), Registry: toolbox.Registry{Root: root, MaxBytes: 512}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	command, err := worker.Command(ctx, shellRun(t, "probe", script{
+		unix:    `printf changed > "$1"`,
+		windows: `echo changed>"%~1"`,
+	}.forPlatform(), target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.CombinedOutput()
+	if _, err := os.Stat(target); err == nil {
+		t.Fatal("a read-only worker created a file")
 	}
 }

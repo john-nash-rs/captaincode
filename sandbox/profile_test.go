@@ -47,7 +47,7 @@ func TestIsolationProfileFollowsTheLiveGrant(t *testing.T) {
 	if err != nil {
 		t.Skipf("no sandbox on this machine: %v", err)
 	}
-	before := strings.Join(readonly.Args, " ")
+	before := strings.Join(readonly.args, " ")
 	if !strings.Contains(before, "(deny default)") {
 		t.Fatalf("the read-only profile is not deny-by-default:\n%s", before)
 	}
@@ -61,7 +61,7 @@ func TestIsolationProfileFollowsTheLiveGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after := strings.Join(writable.Args, " ")
+	after := strings.Join(writable.args, " ")
 	if !strings.Contains(after, "(allow file-write*") {
 		t.Fatalf("the profile does not allow writes after the grant:\n%s", after)
 	}

@@ -16,9 +16,9 @@ If those are clean and your change keeps them clean, the review will be quick.
 
 **Most welcome**, because they close real gaps:
 
-- **A Windows sandbox backend.** The database lock, process setup, and `doctor`
-  reporting are already ported. The missing piece is isolation. This is the
-  single highest-value contribution available.
+- **Windows sandbox hardening.** AppContainer isolation is implemented;
+  useful work includes reviewing ACL boundaries, testing different Windows
+  account configurations, and improving process-tree cancellation.
 - **A Linux sandbox backend that does not need `bubblewrap`.**
   `seccomp`-based, or user namespaces where `bwrap` is unavailable.
 - **A concurrency scheduler.** The core loop is serial by design. There is a
@@ -26,7 +26,7 @@ If those are clean and your change keeps them clean, the review will be quick.
   its way into `core`.
 - **A benchmark.** Reproducible, with the machine and the exact command stated.
   A number without the method is not accepted.
-- **Platforms beyond macOS and Linux**, and their sandbox backends.
+- **Additional operating systems and architectures**, with an enforced sandbox backend.
 
 **Also welcome:** bug reports with a reproduction, clearer failure messages,
 documentation of something that confused you, and tests for behaviour that is
@@ -61,8 +61,8 @@ tell you now than after you have written the code.
   there rather than in a commit message.
 - British or American spelling are both fine; consistency within a file is not
   something to enforce in review.
-- No new runtime dependencies without discussion. There are four today —
-  Bubble Tea, Lip Gloss, the OpenRouter SDK, and a pure-Go SQLite — and the bar
+- No new runtime dependencies without discussion. There are five today —
+  Bubble Tea, Lip Gloss, the OpenRouter SDK, `x/sys`, and a pure-Go SQLite — and the bar
   for a fifth is a good reason, not convenience.
 
 ## Tests
@@ -92,8 +92,7 @@ and a reproduction. You will get an acknowledgement.
 
 ## Releasing
 
-Releases are entirely automated — see [Maintaining a
-release](README.md#maintaining-a-release). Do not publish anything by hand.
+Releases are entirely automated — see [MAINTAINING.md](MAINTAINING.md). Do not publish anything by hand.
 
 ## License
 

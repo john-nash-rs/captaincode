@@ -230,8 +230,9 @@ var secretNames = []string{".git", ".env", ".ssh", ".aws", ".codex"}
 // the paths it actually denied.
 func denyContainerRead(root string, sid *appContainerIdentity) ([]string, error) {
 	subjects := denySubjects(sid)
-	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE |
-		windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
+	// GENERIC_ALL is retained as a generic ACE here because Windows expands it
+	// to the complete file and directory rights set during access checks.
+	mask := windows.ACCESS_MASK(windows.GENERIC_ALL)
 	var denied []string
 	for _, name := range secretNames {
 		path := filepath.Join(root, name)

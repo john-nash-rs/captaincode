@@ -60,6 +60,24 @@ func TestWorkerHasExpectedAppContainerIdentity(t *testing.T) {
 	if actual != expected {
 		t.Errorf("worker AppContainer SID %s differs from ACL SID %s", actual, expected)
 	}
+	// AppContainer access checks require its package SID in the restricted
+	// SID list as well as TokenAppContainerSid. A token with only the latter
+	// would look correct in the package field while ordinary user ACL grants
+	// still authorize writes and secret reads.
+	restricted := make([]uintptr, 128)
+	if err := windows.GetTokenInformation(token, windows.TokenRestrictedSids, (*byte)(unsafe.Pointer(&restricted[0])), uint32(len(restricted)*int(unsafe.Sizeof(restricted[0]))), &returned); err != nil {
+		t.Fatal(err)
+	}
+	groups := (*windows.Tokengroups)(unsafe.Pointer(&restricted[0]))
+	foundRestrictedSID := false
+	for _, group := range groups.AllGroups() {
+		if group.Sid.Equals(sid) {
+			foundRestrictedSID = true
+		}
+	}
+	if !foundRestrictedSID {
+		t.Errorf("worker token's restricted SID list does not contain its AppContainer SID %s", actual)
+	}
 	if err := command.Wait(); err != nil {
 		t.Errorf("worker exit: %v", err)
 	}

@@ -188,7 +188,7 @@ func cageCleanup(root string, sid *appContainerIdentity, denied []string, execut
 	revokeContainer(root, sid)
 	if executableGrant != "" {
 		for _, subject := range containerAccessSIDs(sid) {
-			_ = revokeEntry(executableGrant, subject, windows.GRANT_ACCESS)
+			_ = revokeEntry(executableGrant, subject)
 		}
 	}
 }
@@ -304,7 +304,7 @@ func removeDenyContainerRead(denied []string, sid *appContainerIdentity) {
 	subjects := denySubjects(sid)
 	for _, path := range denied {
 		for _, subject := range subjects {
-			_ = revokeEntry(path, subject, windows.DENY_ACCESS)
+			_ = revokeEntry(path, subject)
 		}
 	}
 }
@@ -317,7 +317,7 @@ func removeDenyContainerRead(denied []string, sid *appContainerIdentity) {
 // run that needed it is over.
 func revokeContainer(root string, sid *appContainerIdentity) {
 	for _, subject := range containerAccessSIDs(sid) {
-		_ = revokeEntry(root, subject, windows.GRANT_ACCESS)
+		_ = revokeEntry(root, subject)
 	}
 }
 
@@ -456,7 +456,7 @@ func trusteeFor(sid *windows.SID) windows.TRUSTEE {
 	}
 }
 
-// revokeEntry removes one subject's entry of one mode from a path.
+// revokeEntry removes this worker's entries for a subject from a path.
 //
 // The OS is asked to do the removal rather than this function walking the list
 // and rebuilding it. Enumerating the entries by hand means reading raw ACE
@@ -469,7 +469,7 @@ func trusteeFor(sid *windows.SID) windows.TRUSTEE {
 // Both inheritance variants are named, because the entry being removed may
 // have been written as either and the request only matches the shape it
 // describes.
-func revokeEntry(path string, subject *windows.SID, mode windows.ACCESS_MODE) error {
+func revokeEntry(path string, subject *windows.SID) error {
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
 	pinner.Pin(subject)
@@ -492,13 +492,13 @@ func revokeEntry(path string, subject *windows.SID, mode windows.ACCESS_MODE) er
 			// generic rights and file-specific masks, so request every bit
 			// when removing this dedicated AppContainer SID's entries.
 			AccessPermissions: windows.ACCESS_MASK(0xffffffff),
-			AccessMode:        mode,
+			AccessMode:        windows.REVOKE_ACCESS,
 			Inheritance:       windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 			Trustee:           trusteeFor(subject),
 		},
 		{
 			AccessPermissions: windows.ACCESS_MASK(0xffffffff),
-			AccessMode:        mode,
+			AccessMode:        windows.REVOKE_ACCESS,
 			Inheritance:       windows.NO_INHERITANCE,
 			Trustee:           trusteeFor(subject),
 		},

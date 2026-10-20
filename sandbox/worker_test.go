@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -85,7 +86,7 @@ func TestOSReadWriteBoundaries(t *testing.T) {
 	// cmd.exe can report success even when its redirection was denied, so
 	// verify the filesystem effect as well as the process exit status.
 	if _, statErr := os.Stat(filepath.Join(root, "new.txt")); statErr == nil {
-		t.Fatalf("read-only write created a file: %s (command error: %v)", output, err)
+		t.Fatalf("read-only write created a file: %s (command error: %v)\nworkspace ACL:\n%s", output, err, windowsACLForTest(t, root))
 	}
 	worker.Registry.AllowWrites = true
 	if output, err := probe(write.forPlatform(), newFile); err != nil {
@@ -166,8 +167,20 @@ func TestTheCageRefusesHomeSecrets(t *testing.T) {
 		t.Fatalf("the worker could not read a file it is allowed to read, so this test cannot tell a denial from a broken worker:\n%s%v", output, err)
 	}
 	if output, _ := read(visible); strings.Contains(output, "secret canary") {
-		t.Fatalf("the worker read a credential inside the workspace:\n%s", output)
+		t.Fatalf("the worker read a credential inside the workspace:\n%s\nsecret ACL:\n%s", output, windowsACLForTest(t, secret))
 	}
+}
+
+func windowsACLForTest(t *testing.T, path string) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return "(not Windows)"
+	}
+	output, err := exec.Command("icacls", path).CombinedOutput()
+	if err != nil {
+		return string(output) + "\nicacls error: " + err.Error()
+	}
+	return string(output)
 }
 
 // A read-only worker must not be able to write, and the workspace it was

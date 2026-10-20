@@ -386,7 +386,7 @@ func isSystemDirectory(path string) bool {
 
 // setContainerEntries writes an access entry for each subject on one path.
 func setContainerEntries(path string, subjects []*windows.SID, mode windows.ACCESS_MODE, mask windows.ACCESS_MASK, inherit bool) error {
-	entries := make([]windows.EXPLICIT_ACCESS, 0, len(subjects)*2)
+	entries := make([]windows.EXPLICIT_ACCESS, 0, len(subjects))
 	// The trustees hold pointers into these SIDs, and the standard library is
 	// explicit that such a pointer must be pinned for as long as the trustee
 	// lives. Without this the collector may move a SID while the call that
@@ -402,20 +402,16 @@ func setContainerEntries(path string, subjects []*windows.SID, mode windows.ACCE
 		}
 		held = append(held, subject)
 		pinned = append(pinned, subject)
+		inheritance := uint32(windows.NO_INHERITANCE)
+		if inherit {
+			inheritance = windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT
+		}
 		entries = append(entries, windows.EXPLICIT_ACCESS{
 			AccessPermissions: mask,
 			AccessMode:        mode,
-			Inheritance:       windows.NO_INHERITANCE,
+			Inheritance:       inheritance,
 			Trustee:           trusteeFor(subject),
 		})
-		if inherit {
-			entries = append(entries, windows.EXPLICIT_ACCESS{
-				AccessPermissions: mask,
-				AccessMode:        mode,
-				Inheritance:       windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT,
-				Trustee:           trusteeFor(subject),
-			})
-		}
 	}
 	if len(entries) == 0 {
 		return nil

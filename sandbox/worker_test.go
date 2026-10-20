@@ -3,7 +3,6 @@ package sandbox
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -60,7 +59,6 @@ func TestOSReadWriteBoundaries(t *testing.T) {
 		inside = "/workspace/inside.txt"
 		newFile = "/workspace/new.txt"
 	}
-	workspaceACL := "(not captured)"
 	probe := func(script string, args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -68,15 +66,8 @@ func TestOSReadWriteBoundaries(t *testing.T) {
 		if err != nil {
 			return "", err
 		}
-		var output strings.Builder
-		command.Stdout = &output
-		command.Stderr = &output
-		if err := command.Start(); err != nil {
-			return output.String(), err
-		}
-		workspaceACL = windowsACLForTest(t, root)
-		err = command.Wait()
-		return output.String(), err
+		output, err := command.CombinedOutput()
+		return string(output), err
 	}
 	// t.TempDir paths on the hosted Windows runner contain no spaces. Avoid
 	// nested quotes here: cmd.exe's /c parser does not use the C-runtime quote
@@ -94,7 +85,7 @@ func TestOSReadWriteBoundaries(t *testing.T) {
 	// cmd.exe can report success even when its redirection was denied, so
 	// verify the filesystem effect as well as the process exit status.
 	if _, statErr := os.Stat(filepath.Join(root, "new.txt")); statErr == nil {
-		t.Fatalf("read-only write created a file: %s (command error: %v)\nworkspace ACL while worker was running:\n%s", output, err, workspaceACL)
+		t.Fatalf("read-only write created a file: %s (command error: %v)", output, err)
 	}
 	worker.Registry.AllowWrites = true
 	if output, err := probe(write.forPlatform(), newFile); err != nil {
@@ -158,7 +149,6 @@ func TestTheCageRefusesHomeSecrets(t *testing.T) {
 		control = "/workspace/readable.txt"
 	}
 	probe := script{unix: `cat "$1"`, windows: `type %~1`}.forPlatform()
-	secretACL := "(not captured)"
 	read := func(path string) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -166,15 +156,8 @@ func TestTheCageRefusesHomeSecrets(t *testing.T) {
 		if err != nil {
 			return "", err
 		}
-		var output strings.Builder
-		command.Stdout = &output
-		command.Stderr = &output
-		if err := command.Start(); err != nil {
-			return output.String(), err
-		}
-		secretACL = windowsACLForTest(t, secret)
-		err = command.Wait()
-		return output.String(), err
+		output, err := command.CombinedOutput()
+		return string(output), err
 	}
 	// The control first. A read that is supposed to work proves the worker
 	// can start, can reach the workspace, and can use the shell; only then
@@ -183,26 +166,8 @@ func TestTheCageRefusesHomeSecrets(t *testing.T) {
 		t.Fatalf("the worker could not read a file it is allowed to read, so this test cannot tell a denial from a broken worker:\n%s%v", output, err)
 	}
 	if output, _ := read(visible); strings.Contains(output, "secret canary") {
-		t.Fatalf("the worker read a credential inside the workspace:\n%s\nsecret ACL while worker was running:\n%s", output, secretACL)
+		t.Fatalf("the worker read a credential inside the workspace:\n%s", output)
 	}
-}
-
-func windowsACLForTest(t *testing.T, path string) string {
-	t.Helper()
-	if runtime.GOOS != "windows" {
-		return "(not Windows)"
-	}
-	output, err := exec.Command("icacls", path).CombinedOutput()
-	if err != nil {
-		return string(output) + "\nicacls error: " + err.Error()
-	}
-	quotedPath := strings.ReplaceAll(path, "'", "''")
-	command := "$acl = Get-Acl -LiteralPath '" + quotedPath + "'; $acl.Sddl"
-	sddl, sddlErr := exec.Command("powershell.exe", "-NoProfile", "-Command", command).CombinedOutput()
-	if sddlErr != nil {
-		return string(output) + "\nSDDL error: " + sddlErr.Error() + "\n" + string(sddl)
-	}
-	return string(output) + "\nSDDL: " + strings.TrimSpace(string(sddl))
 }
 
 // A read-only worker must not be able to write, and the workspace it was

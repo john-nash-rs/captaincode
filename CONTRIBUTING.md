@@ -63,7 +63,7 @@ tell you now than after you have written the code.
   something to enforce in review.
 - No new runtime dependencies without discussion. There are five today —
   Bubble Tea, Lip Gloss, the OpenRouter SDK, `x/sys`, and a pure-Go SQLite — and the bar
-  for a fifth is a good reason, not convenience.
+  for another dependency is a good reason, not convenience.
 
 ## Tests
 
@@ -92,7 +92,8 @@ and a reproduction. You will get an acknowledgement.
 
 ## Releasing
 
-Releases are entirely automated — see [MAINTAINING.md](MAINTAINING.md). Do not publish anything by hand.
+Releases are entirely automated — see
+[MAINTAINING.md](MAINTAINING.md). Do not publish anything by hand.
 
 ## License
 

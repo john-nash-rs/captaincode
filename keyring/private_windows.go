@@ -79,7 +79,7 @@ func accessFor(mode os.FileMode) windows.ACCESS_MASK {
 	rights := windows.ACCESS_MASK(windows.FILE_GENERIC_READ |
 		windows.FILE_GENERIC_EXECUTE |
 		windows.READ_CONTROL |
-		windows.WRITE_DAC)
+		windows.WRITE_DAC |\n\t\twindows.DELETE)
 	if mode&0o200 != 0 {
 		rights |= windows.FILE_GENERIC_WRITE
 	}

@@ -48,14 +48,8 @@ func TestWorkerHasExpectedAppContainerIdentity(t *testing.T) {
 	if info.sid == nil {
 		t.Fatal("worker token has no AppContainer SID")
 	}
-	actual, err := info.sid.String()
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected, err := command.container.sid.String()
-	if err != nil {
-		t.Fatal(err)
-	}
+	actual := info.sid.String()
+	expected := command.container.sid.String()
 	if actual != expected {
 		t.Errorf("worker AppContainer SID %s differs from ACL SID %s", actual, expected)
 	}

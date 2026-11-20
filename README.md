@@ -80,7 +80,7 @@ sh install.sh --help
 > sh install.sh
 > ```
 >
-> It is 326 lines and its only network fetches are the release metadata, your
+> It is 347 lines and its only network fetches are the release metadata, your
 > platform's archive, and `checksums.txt`.
 
 ### Windows PowerShell installer

@@ -16,6 +16,7 @@ if [ ! -s "$tmp/fn.sh" ]; then
 	echo "FAIL: kernel_supported() not found in install.sh" >&2
 	exit 1
 fi
+# shellcheck source=/dev/null
 . "$tmp/fn.sh"
 
 failures=0

@@ -103,13 +103,34 @@ case "$arch" in
 	*) die "unsupported architecture: $arch (supported: amd64, arm64)" ;;
 esac
 
+# kernel_supported <release> succeeds unless the release is older than 3.10.
+#
+# It compares numbers, not prefixes. A pattern such as "3.*" cannot tell 3.9
+# from 3.18, and listing every major version as a pattern rejects every kernel
+# that is actually in use. A string that cannot be read is allowed through:
+# refusing to install over a version we failed to parse is worse than the
+# problem this guards against.
+kernel_supported() {
+	_rel=$1
+	_major=${_rel%%.*}
+	_rest=${_rel#*.}
+	_minor=${_rest%%[!0-9]*}
+	case "$_major" in ''|*[!0-9]*) return 0 ;; esac
+	case "$_minor" in ''|*[!0-9]*) return 0 ;; esac
+	[ "$_major" -gt 3 ] && return 0
+	[ "$_major" -lt 3 ] && return 1
+	[ "$_minor" -ge 10 ]
+}
+
 # The binary is linked without cgo, so it needs no libc compatibility shim on
 # Linux. Record the minimum kernel requirement rather than silently producing a
 # binary that fails to start on an older host.
+#
+# A failing uname gives an empty string, which kernel_supported lets through;
+# the old fallback of "0" would now read as a kernel older than 3.10.
 if [ "$os" = "linux" ]; then
-	case "$(uname -r 2>/dev/null || echo 0)" in
-		2.*|3.*|4.*|5.*|6.*) die "Linux kernel 3.10 or newer is required" ;;
-	esac
+	kernel_supported "$(uname -r 2>/dev/null || true)" \
+		|| die "Linux kernel 3.10 or newer is required"
 fi
 
 # ---------------------------------------------------------------------------
